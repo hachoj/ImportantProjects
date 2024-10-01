@@ -1,6 +1,6 @@
 import torch
 import tiktoken
-from train_gpt2 import GPT, GPT_config
+from train_model import GPT, GPT_config
 
 # Load the model
 torch.set_float32_matmul_precision('high')

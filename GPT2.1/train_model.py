@@ -7,7 +7,16 @@ import tiktoken
 import numpy as np
 import time
 import math
+import os
+from SLM.hellaswag import render_example, iterate_examples
 
+@dataclass
+class GPT_config:
+    block_size:int = 1024
+    vocab_size:int = 128256
+    n_layer:int = 12
+    n_head:int = 12
+    n_embd:int = 768
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
@@ -19,14 +28,13 @@ class CausalSelfAttention(nn.Module):
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        self.c_proj.NANOGPT_SCALE_INIT = 1 # type: ignore
-        # regularization
+        self.c_proj.REGULARIZE = 1  # type: ignore
         self.n_head = config.n_head
         self.n_embd = config.n_embd
 
-        # not really a 'bias', more fo a mask, but following the OpenAI/HF naming
-        self.register_buffer('bias', torch.tril(torch.ones(config.block_size, config.block_size))
-                             .view(1, 1, config.block_size, config.block_size))
+        # no longer needed with the scaled dot product attention is_causal=True
+        # self.register_buffer('bias', torch.tril(torch.ones(config.block_size, config.block_size))
+        #                      .view(1, 1, config.block_size, config.block_size))
 
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -37,9 +45,7 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-
         y = F.scaled_dot_product_attention(q, k, v, is_causal=True)  # (B, nh, T, hs) Flash attention
-
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         # output projection
         y = self.c_proj(y)
@@ -52,7 +58,7 @@ class MLP(nn.Module):
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.gelu = nn.GELU(approximate='tanh')
         self.c_proj = nn.Linear(config.n_embd * 4, config.n_embd)
-        self.c_proj.NANOGPT_SCALE_INIT = 1 # type: ignore
+        self.c_proj.REGULARIZE = 1 # type: ignore
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -74,16 +80,7 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
-@dataclass
-class GPT_config:
-    block_size:int = 1024
-    vocab_size:int = 50257
-    n_layer:int = 12
-    n_head:int = 12
-    n_embd:int = 768
-
 class GPT(nn.Module):
-
     def __init__(self, config):
         super().__init__()
         self.config = config 
@@ -100,10 +97,11 @@ class GPT(nn.Module):
 
         self.apply(self._init_weights)
 
+    # copies GPT-2 weight initialization
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
             std = 0.02
-            if hasattr(module, 'NANOGPT_SCALE_INIT'):
+            if hasattr(module, 'REGULARIZE'):
                 std *= (2 * self.config.n_layer) ** -0.5
             torch.nn.init.normal_(module.weight, mean=0.0, std=std)
             if module.bias is not None:
@@ -195,47 +193,77 @@ class GPT(nn.Module):
         ]
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
-        print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+        # print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        # print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
         # create a fused adamW optimizer if possible
         fused_availabel = 'fused' in inspect.signature(torch.optim.AdamW).parameters # type: ignore
         use_fused = fused_availabel and 'cuda' in device
-        print(f"using fused AdamW: {use_fused}")
+        # print(f"using fused AdamW: {use_fused}")
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8) # type: ignore
         return optimizer
 
 class DataLoaderLite:
-    def __init__(self, B, T):
+    def __init__(self, B, T, process_rank, num_processes):
         self.B = B
         self.T = T
+        self.process_rank = process_rank
+        self.num_processes = num_processes
 
-        with open('GPT2.1/input.txt', 'r') as f:
+        with open('training_text/input.txt', 'r') as f:
             text = f.read()
         enc = tiktoken.get_encoding('gpt2')
         tokens = enc.encode(text)
         self.tokens = torch.tensor(tokens)
-        print(f"loaded {len(self.tokens)} tokens")
-        print(f"1 epoch = {len(self.tokens) // (B*T)} batches")
+        # print(f"loaded {len(self.tokens)} tokens")
+        # print(f"1 epoch = {len(self.tokens) // (B*T)} batches")
 
         # state
-        self.current_position = 0
+        self.current_position = self.B * self.T * self.process_rank
 
     def next_batch(self):
         B, T = self.B, self.T
-        buf = self.tokens[self.current_position:self.current_position + B*T + 1]
+        buf = self.tokens[self.current_position:self.current_position + B * T + 1]
         x = buf[:-1].view(B, T)
         y = buf[1:].view(B, T)
-        self.current_position += B*T
-        if self.current_position + (B*T + 1) > len(self.tokens):
-            self.current_position = 0
+        self.current_position += B * T * self.num_processes
+        if self.current_position + (B * T * self.num_processes + 1) > len(self.tokens):
+            self.current_position = self.B * self.T * self.process_rank
         return x, y
 
 
 
 if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    # fine_tuning = True
-    # lr = 1e-5 if fine_tuning else 3e-4
+
+    # ----------------------------------------------------------------------
+    # Setting up DDP
+
+    from torch.distributed import init_process_group, destroy_process_group
+    from torch.nn.parallel import DistributedDataParallel as DDP
+    import torch.distributed as dist
+
+    ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run
+    print(f"using ddp: {ddp}")
+    if ddp:
+        # use of DDP atm demands CUDA, we set the device appropriately according to the rank
+        assert torch.cuda.is_available()
+        init_process_group(backend='nccl')
+        ddp_rank = int(os.environ['RANK'])
+        ddp_local_rank = int(os.environ['LOCAL_RANK'])
+        ddp_world_size = int(os.environ['WORLD_SIZE'])
+        device = f'cuda:{ddp_local_rank}'
+        torch.cuda.set_device(device)
+        master_process = ddp_rank == 0
+    else:
+        ddp_rank = 0
+        ddp_local_rank = 0
+        ddp_world_size = 1
+        master_process = True
+        # attempt  to autodetect device
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        print(f"Running on {device}")
+
+    # ----------------------------------------------------------------------
 
     torch.manual_seed(1337)
     torch.cuda.manual_seed(1337)
@@ -243,21 +271,28 @@ if __name__ == '__main__':
     # calculate the number of gradient accumulation steps
     # for the desired batch size
     total_batch_size = 524288
-    B=4
+    B=32
     T=1024
-    assert total_batch_size % (B * T) == 0
-    grad_accum_steps = total_batch_size // (B * T)
-    print(f"total desired batch size: {total_batchsize}")
-    print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
+    assert total_batch_size % (B * T * ddp_world_size) == 0
+    grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
+    if master_process:
+        print(f"total desired batch size: {total_batch_size}")
+        print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
 
-    train_loader = DataLoaderLite(B=B, T=T)
+    train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size)
 
     torch.set_float32_matmul_precision('high')
 
-    load_pretrained = True if input("Load pretrained model? [y/n]: ") == 'y' else False
+    # create model
+    # if master_process:
+    #     load_pretrained = True if input("Load pretrained model? [y/n]: ") == 'y' else False
+    load_pretrained = False
     model = GPT.from_pretrained('gpt2') if load_pretrained else GPT(GPT_config)
     model.to(device)
     model = torch.compile(model)
+    if ddp:
+        model = DDP(model, device_ids=[ddp_local_rank])
+    raw_model = model.module if ddp else model    
 
     # taken from GPT-3 paper
     max_lr = 6e-4
@@ -276,7 +311,7 @@ if __name__ == '__main__':
         coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff starts at 1 and goes to 0
         return min_lr + coeff * (max_lr - min_lr)    
 
-    optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
+    optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
 
     t00 = time.time()
 
@@ -285,7 +320,7 @@ if __name__ == '__main__':
         t0 = time.time()
         optimizer.zero_grad()
         loss_accum = 0.0  # this is just for printing the loss
-        for micro_step in range(grad_accum_steps):
+        for microstep in range(grad_accum_steps):
             x, y = train_loader.next_batch()
             x, y = x.to(device), y.to(device)
             with torch.autocast(device_type=device, dtype=torch.bfloat16):
@@ -293,8 +328,11 @@ if __name__ == '__main__':
             # each loss.backward() call accumulates gradients
             loss = loss / grad_accum_steps # scale the loss for the gradient accumulation
             loss_accum += loss.detach()
+            if ddp:
+                model.require_backward_grad_sync = (microstep == grad_accum_steps - 1)
             loss.backward()
-
+        if ddp:
+            dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
         # taken from GPT-3 paper
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
@@ -306,9 +344,13 @@ if __name__ == '__main__':
         torch.cuda.synchronize()
         t1 = time.time()
         dt = (t1 - t0) # time difference in seconds
-        tokens_processed = train_loader.B * train_loader.T * grad_accum_steps
-        tokens_per_sec = tokens_processed / (t1 - t0)
-        print(f"step {step:4d} | loss: {loss_accum.item():.6f} | lr {lr:.4e} | norm: {norm:.4f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f}")  # type: ignore
+        tokens_processed = train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size
+        tokens_per_sec = tokens_processed / dt
+        if master_process:
+            print(f"step {step:4d} | loss: {loss_accum.item():.6f} | lr {lr:.4e} | norm: {norm:.4f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f}")  # type: ignore
+
+    if ddp:
+        destroy_process_group()
 
         # if step%(max_steps/20) == 0:
         #     print(f"step {step+1}/{max_steps} | loss: {loss.item():.6f} | norm: {norm:.2f} | tokens/s: {tokens_per_sec:.2f} | ms/batch: {dt:.2f}")
@@ -320,106 +362,3 @@ if __name__ == '__main__':
     torch.save(model.state_dict(), 'models/gpt2_nano_test.pth')
 
     import sys; sys.exit(0)
-
-
-
-
-# --------------------------------------------------------------------------------------
-
-# model = GPT.from_pretrained('gpt2')
-# # model.eval()
-# model.to('cuda')
-
-# # prefix tokens
-# import tiktoken
-# enc = tiktoken.get_encoding('gpt2')
-# text = open('shakespeare_long.txt', 'r').read()
-# tokens = enc.encode(text)
-# # tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1)
-# # x = tokens.to('cuda')
-
-# buf = torch.tensor(tokens[:GPT_config.block_size*GPT_config.batch_size + 1], requires_grad=False)
-# x = buf[:-1].view(GPT_config.batch_size, GPT_config.block_size).to(GPT_config.device)
-# y = buf[1:].view(GPT_config.batch_size, GPT_config.block_size).to(GPT_config.device)
-
-# # model = GPT(GPT_config).to(GPT_config.device)
-# logits, loss = model(x, y)
-# print(logits.shape, loss)
-
-
-# # generate
-# num_return_sequences = 5
-# max_length = 30
-# torch.manual_seed()
-# torch.cuda.manual_seed(42)
-# tokens = enc.encode('')
-# tokens = torch.tensor(tokens, dtype=torch.long, device='cuda')
-# tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1)
-# x = tokens.to('cuda')
-# while x.size(1) < max_length:
-#     with torch.no_grad():
-#         logits, loss = model(x)
-
-#         logits = logits[:, -1, :]
-
-#         probs = F.softmax(logits, dim=-1)
-
-#         topk_probs, topk_indices = torch.topk(probs, 10, dim=-1)
-
-#         ix = torch.multinomial(topk_probs, num_samples=1)
-
-#         xcol = torch.gather(topk_indices, -1, ix)
-
-#         x = torch.cat((x, xcol), dim=1)
-
-# # decode
-# for i in range(num_return_sequences):
-#     tokens = x[i, :max_length].tolist()
-#     decoded = enc.decode(tokens)
-#     print(">", decoded)
-
-
-# --------------------------------------------------------------------------------------
-# fine-tuning
-
-
-# if __name__ == '__main__':
-#     import tiktoken
-#     enc = tiktoken.get_encoding('gpt2')
-
-#     model = GPT.from_pretrained('gpt2')
-#     model.to('cuda')
-
-#     # prefix tokens
-#     text = open('kendrick.txt', 'r').read()
-#     tokens = enc.encode(text)
-#     n = int(0.9*len(tokens))
-#     train_data = tokens[:n]
-#     val_data = tokens[n:]
-#     def get_batch(split):
-#         data = train_data if split == 'train' else val_data
-#         ix = torch.randint(0, len(data) - GPT_config.block_size * GPT_config.batch_size, (1,)).item()
-#         buf = torch.tensor(data[ix:ix+GPT_config.block_size*GPT_config.batch_size + 1], requires_grad=False)
-
-#         x = buf[:-1].view(GPT_config.batch_size, GPT_config.block_size).to(GPT_config.device)
-#         y = buf[1:].view(GPT_config.batch_size, GPT_config.block_size).to(GPT_config.device)
-#         return x, y
-#     parameters = 0
-#     for parameter in model.parameters():
-#         pc = 1
-#         for dim in range(parameter.ndim):
-#             pc *= parameter.size(dim=dim)
-#         parameters += pc
-#     print(f'Num parameters: {parameters}')
-#     optimizer = torch.optim.AdamW(model.parameters(), lr=5e-4)
-#     model.train()
-#     for steps in range(GPT_config.max_iters):
-#         break
-#         print(F"{steps}/{GPT_config.max_iters}")
-#         xb, yb = get_batch('train')
-
-#         logits, loss = model(xb, yb)
-#         optimizer.zero_grad(set_to_none=True)
-#         loss.backward()
-#         optimizer.step()
-#     # torch.save(model.state_dict(), 'model/gpt2_funny.pth')
