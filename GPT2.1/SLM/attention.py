@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# this is for an easy PyTorch implementation of RoPE 
+import torchtune.modules as ttm
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -15,10 +18,9 @@ class CausalSelfAttention(nn.Module):
         self.c_proj.REGULARIZE = 1  # type: ignore
         self.n_head = config.n_head
         self.n_embd = config.n_embd
+        self.head_dim = config.n_embd // config.n_head
 
-        # no longer needed with the scaled dot product attention is_causal=True
-        # self.register_buffer('bias', torch.tril(torch.ones(config.block_size, config.block_size))
-        #                      .view(1, 1, config.block_size, config.block_size))
+        self.rope = ttm.RotaryPositionalEmbeddings(dim=self.head_dim, max_seq_len=config.block_size)  # input tensor with shape [b, s, n_h, h_d]
 
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -26,9 +28,19 @@ class CausalSelfAttention(nn.Module):
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         qkv = self.c_attn(x)
         q, k, v  = qkv.split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        k = k.view(B, T, self.n_head, C // self.n_head) # (B, T, nh, hs)
+        q = q.view(B, T, self.n_head, C // self.n_head) # (B, T, nh, hs)
+        v = v.view(B, T, self.n_head, C // self.n_head) # (B, T, nh, hs)
+        # apply ROPE
+        q = self.rope(q)
+        k = self.rope(k)
+
+        # now transposing qkv for flash attention
+
+        q = q.transpose(1, 2) # (B, nh, T, hs)
+        k = k.transpose(1, 2) # (B, nh, T, hs)
+        v = v.transpose(1, 2) # (B, nh, T, hs)
+
         y = F.scaled_dot_product_attention(q, k, v, is_causal=True)  # (B, nh, T, hs) Flash attention
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         # output projection

@@ -28,12 +28,11 @@ The validation set of HellaSwag has a total of 10,042 examples.
 import os
 import json
 import requests
-import tiktoken
 from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from transformers import GPT2LMHeadModel
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # -----------------------------------------------------------------------------
 DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), "hellaswag")
@@ -59,7 +58,7 @@ hellaswags = {
     "test": "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_test.jsonl",
 }
 
-enc = tiktoken.get_encoding("gpt2")
+tokenizer = AutoTokenizer.from_pretrained("allenai/OLMo-1B-hf")
 
 def download(split):
     """Downloads HellaSwag DATA_CACHE_DIR"""
@@ -89,12 +88,16 @@ def render_example(example):
     }
 
     # gather up all the tokens
-    ctx_tokens = enc.encode(ctx)
+    ctx_tokens = []
+    ctx_tokens.extend(tokenizer(ctx).input_ids)
+    # ctx_tokens = enc.encode(ctx)
     data["ctx_tokens"] = ctx_tokens
     tok_rows = []
     mask_rows = []
     for end in endings:
-        end_tokens = enc.encode(" " + end) # note: prepending " " because GPT-2 tokenizer
+        end_tokens = []
+        end_tokens.extend(tokenizer(" " + end).input_ids)
+        # end_tokens = enc.encode(" " + end) # note: prepending " " because GPT-2 tokenizer
         tok_rows.append(ctx_tokens + end_tokens)
         mask_rows.append([0]*len(ctx_tokens) + [1]*len(end_tokens))
         data["ending_tokens"].append(end_tokens)
@@ -118,12 +121,12 @@ def iterate_examples(split):
             yield example
 
 @torch.no_grad()
-def evaluate(model_type, device):
+def evaluate(device):
 
     torch.set_float32_matmul_precision('high') # use tf32
-    model = GPT2LMHeadModel.from_pretrained(model_type)
+    model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-1B-hf")
     model.to(device)
-    # model = torch.compile(model) # optionally torch compile the model
+    model = torch.compile(model) # optionally torch compile the model
 
     num_correct_norm = 0
     num_correct = 0
@@ -168,10 +171,30 @@ def evaluate(model_type, device):
                 print(f"{i} (loss: {avg_loss[i].item():.4f}) {end}")
             print(f"predicted: {pred_norm}, actual: {label}")
 
+def get_most_likely_row(tokens, mask, logits):
+    # evaluate the autoregressive loss at all positions
+    shift_logits = (logits[..., :-1, :]).contiguous()
+    shift_tokens = (tokens[..., 1:]).contiguous()
+    flat_shift_logits = shift_logits.view(-1, shift_logits.size(-1))
+    flat_shift_tokens = shift_tokens.view(-1)
+    shift_losses = F.cross_entropy(flat_shift_logits, flat_shift_tokens, reduction='none')
+    shift_losses = shift_losses.view(tokens.size(0), -1)
+    # now get the average loss just for the completion region (where mask == 1), in each row
+    shift_mask = (mask[..., 1:]).contiguous() # we must shift mask, so we start at the last prompt token
+    masked_shift_losses = shift_losses * shift_mask
+    # sum and divide by the number of 1s in the mask
+    sum_loss = masked_shift_losses.sum(dim=1)
+    avg_loss = sum_loss / shift_mask.sum(dim=1)
+    # now we have a loss for each of the 4 completions
+    # the one with the lowest loss should be the most likely
+    pred_norm = avg_loss.argmin().item()
+    return pred_norm
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("-m", "--model_type", type=str, default="gpt2", help="the model type to use")
+    # parser.add_argument("-m", "--model_type", type=str, default="gpt2", help="the model type to use")
     parser.add_argument("-d", "--device", type=str, default="cuda", help="the device to use")
     args = parser.parse_args()
-    evaluate(args.model_type, args.device)
+    # evaluate(args.model_type, args.device)
+    evaluate(args.device)
