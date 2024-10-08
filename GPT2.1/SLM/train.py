@@ -13,6 +13,11 @@ from lr_schedular import get_lr
 from hellaswag import *
 
 if __name__ == '__main__':
+    default_name = "SLM-0.124B"
+    model_name = input("Enter the model name (for default press enter): ")
+    model_name = default_name if model_name == "" else model_name
+
+    print(f"Training model: {model_name}")
 
     # ----------------------------------------------------------------------
     # Setting up DDP
@@ -79,14 +84,14 @@ if __name__ == '__main__':
     max_lr = 6e-4
     min_lr = max_lr * 0.1
     warmup_steps = 400
-    max_steps = 2800 #TODO TBD
+    max_steps = 19073 #TODO TBD
 
     optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
 
     # create the log directory we will write checkpoints to and log to
     log_dir = "SLM/logs"
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f"SLM-0.23_log.txt")
+    log_file = os.path.join(log_dir, f"{model_name}_log.txt")
     with open(log_file, "w") as f: # open for writing to clear the file
         pass
 
@@ -127,7 +132,7 @@ if __name__ == '__main__':
                     f.write(f"{step} val {val_loss_accum.item():.4f}\n")  # type: ignore
                 if step > 0 and (step % 5000 == 0 or last_step):
                     # optionally write model checkpoints
-                    checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
+                    checkpoint_path = os.path.join(log_dir, f"model_{model_name}_{step:05d}.pt")
                     checkpoint = {
                         'model': raw_model.state_dict(),
                         'config': raw_model.config,
@@ -209,4 +214,4 @@ if __name__ == '__main__':
     if ddp:
         destroy_process_group()
 
-    torch.save(model.state_dict(), 'models/test.pth')
+    torch.save(model.state_dict(), f"models/{model_name}.pth")
