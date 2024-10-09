@@ -8,7 +8,7 @@ import os
 
 from config import GPT_config
 from data_loader import DataLoaderLite
-from model import GPT
+from model import SLM
 from lr_schedular import get_lr
 from hellaswag import *
 
@@ -18,6 +18,8 @@ if __name__ == '__main__':
     model_name = default_name if model_name == "" else model_name
 
     print(f"Training model: {model_name}")
+
+    use_cpu = input("Use CPU? (y/n): ") == "y" 
 
     # ----------------------------------------------------------------------
     # Setting up DDP
@@ -46,7 +48,8 @@ if __name__ == '__main__':
         master_process = True
         # attempt  to autodetect device
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        # device = 'cpu'
+        if use_cpu:
+            device = 'cpu'
         print(f"Running on {device}")
 
     # ----------------------------------------------------------------------
@@ -70,7 +73,7 @@ if __name__ == '__main__':
 
     torch.set_float32_matmul_precision('high')
 
-    model = GPT(GPT_config)
+    model = SLM(GPT_config)
     model.to(device)
     # model = torch.compile(model)
     if ddp:
@@ -89,7 +92,7 @@ if __name__ == '__main__':
     optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
 
     # create the log directory we will write checkpoints to and log to
-    log_dir = "SLM/logs"
+    log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, f"{model_name}_log.txt")
     with open(log_file, "w") as f: # open for writing to clear the file
@@ -118,10 +121,13 @@ if __name__ == '__main__':
                 val_loss_accum = 0.0
                 val_loss_steps = 20
                 for _ in range(val_loss_steps):
-                    x, y = val_loader.next_batch()
-                    x, y = x.to(device), y.to(device)
+                    x, y, pos = val_loader.next_batch()
+                    x, y, pos = x.to(device), y.to(device), pos.to(device)
+
+                    from transformers import AutoTokenizer
+                    tokenizer = AutoTokenizer.from_pretrained("allenai/OLMo-1B-hf")
                     with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-                        logits, loss = model(x, y)
+                        logits, loss = model(x, y, pos)
                     loss = loss / val_loss_steps
                     val_loss_accum += loss.detach()
             if ddp:
@@ -181,10 +187,10 @@ if __name__ == '__main__':
         optimizer.zero_grad()
         loss_accum = 0.0  # this is just for printing the loss
         for microstep in range(grad_accum_steps):
-            x, y = train_loader.next_batch()
-            x, y = x.to(device), y.to(device)
+            x, y, pos = train_loader.next_batch()
+            x, y, pos = x.to(device), y.to(device), pos.to(device)
             with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                logits, loss = model(x, y)
+                logits, loss = model(x, y, pos)
             # each loss.backward() call accumulates gradients
             loss = loss / grad_accum_steps # scale the loss for the gradient accumulation
             loss_accum += loss.detach()

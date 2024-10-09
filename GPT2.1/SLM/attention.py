@@ -1,3 +1,6 @@
+from ctypes import pointer
+from turtle import pos
+from pyparsing import PositionToken
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,7 +25,7 @@ class CausalSelfAttention(nn.Module):
 
         self.rope = ttm.RotaryPositionalEmbeddings(dim=self.head_dim, max_seq_len=config.block_size)  # input tensor with shape [b, s, n_h, h_d]
 
-    def forward(self, x):
+    def forward(self, x, positions=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
@@ -32,8 +35,18 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head) # (B, T, nh, hs)
         v = v.view(B, T, self.n_head, C // self.n_head) # (B, T, nh, hs)
         # apply ROPE
-        q = self.rope(q)
-        k = self.rope(k)
+        # positions = None
+        if positions is not None:
+            if positions is not None and torch.any(positions > (self.rope.max_seq_len - 1)):
+                invalid_positions = positions[positions > (self.rope.max_seq_len - 1)]
+                print(f"Invalid positions detected: {invalid_positions}")
+                print(f"Full positions tensor: {positions}")
+                positions = torch.clamp(positions, min=0, max=self.rope.max_seq_len - 1)
+                q = self.rope(q, input_pos=positions)
+                k = self.rope(k, input_pos=positions)
+            else:
+                q = self.rope(q)
+            k = self.rope(k)
 
         # now transposing qkv for flash attention
 

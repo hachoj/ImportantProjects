@@ -14,7 +14,7 @@ class Block(nn.Module):
         self.rms_2 = nn.RMSNorm(config.n_embd)
         self.mlp = MLP(config)
 
-    def forward(self, x):
-        x = x + self.attn(self.rms_1(x))
+    def forward(self, x, positions=None):
+        x = x + self.attn(self.rms_1(x), positions)
         x = x + self.mlp(self.rms_2(x))
         return x

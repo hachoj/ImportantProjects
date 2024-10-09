@@ -6,7 +6,7 @@ import inspect
 
 from model_block import Block
 
-class GPT(nn.Module):
+class SLM(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config 
@@ -36,7 +36,7 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
      
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, positions=None):
         # idx is of shape (B, T)
         B, T = idx.size()
         assert T <= self.config.block_size, "Cannot forward, model block size is exhausted."
@@ -46,7 +46,7 @@ class GPT(nn.Module):
     
         # froward the blocks of the transformer
         for block in self.transformer.h:
-            x = block(x)
+            x = block(x, positions)
         # forward the final layer norm and the classifier 
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x) # (B, T, vocab_size)
