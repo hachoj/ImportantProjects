@@ -13,13 +13,7 @@ from lr_schedular import get_lr
 from hellaswag import *
 
 if __name__ == '__main__':
-    default_name = "SLM-0.124B"
-    model_name = input("Enter the model name (for default press enter): ")
-    model_name = default_name if model_name == "" else model_name
-
-    print(f"Training model: {model_name}")
-
-    use_cpu = input("Use CPU? (y/n): ") == "y" 
+    model_name = "SLM-0.124B"
 
     # ----------------------------------------------------------------------
     # Setting up DDP

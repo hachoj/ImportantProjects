@@ -1,9 +1,8 @@
-name: /home/ubuntu/miniforge3/envs/lambda_env
+name: lambda_env
 channels:
   - pytorch
   - nvidia
   - conda-forge
-  - defaults
 dependencies:
   - _libgcc_mutex=0.1=conda_forge
   - _openmp_mutex=4.5=2_kmp_llvm
@@ -183,6 +182,7 @@ dependencies:
       - psutil==6.0.0
       - pyarrow==17.0.0
       - pycryptodomex==3.21.0
+      - pyparsing==3.1.4
       - python-dateutil==2.9.0.post0
       - pytz==2024.2
       - regex==2024.9.11
