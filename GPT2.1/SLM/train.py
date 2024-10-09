@@ -42,8 +42,6 @@ if __name__ == '__main__':
         master_process = True
         # attempt  to autodetect device
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        if use_cpu:
-            device = 'cpu'
         print(f"Running on {device}")
 
     # ----------------------------------------------------------------------
@@ -81,7 +79,7 @@ if __name__ == '__main__':
     max_lr = 6e-4
     min_lr = max_lr * 0.1
     warmup_steps = 400
-    max_steps = 19073 #TODO TBD
+    max_steps = 19073 
 
     optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
 
@@ -118,8 +116,6 @@ if __name__ == '__main__':
                     x, y, pos = val_loader.next_batch()
                     x, y, pos = x.to(device), y.to(device), pos.to(device)
 
-                    from transformers import AutoTokenizer
-                    tokenizer = AutoTokenizer.from_pretrained("allenai/OLMo-1B-hf")
                     with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
                         logits, loss = model(x, y, pos)
                     loss = loss / val_loss_steps

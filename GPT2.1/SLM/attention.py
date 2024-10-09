@@ -37,15 +37,10 @@ class CausalSelfAttention(nn.Module):
         # apply ROPE
         # positions = None
         if positions is not None:
-            if positions is not None and torch.any(positions > (self.rope.max_seq_len - 1)):
-                invalid_positions = positions[positions > (self.rope.max_seq_len - 1)]
-                print(f"Invalid positions detected: {invalid_positions}")
-                print(f"Full positions tensor: {positions}")
-                positions = torch.clamp(positions, min=0, max=self.rope.max_seq_len - 1)
-                q = self.rope(q, input_pos=positions)
-                k = self.rope(k, input_pos=positions)
-            else:
-                q = self.rope(q)
+            q = self.rope(q, input_pos=positions)
+            k = self.rope(k, input_pos=positions)
+        else:
+            q = self.rope(q)
             k = self.rope(k)
 
         # now transposing qkv for flash attention
