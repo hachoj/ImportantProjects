@@ -13,7 +13,10 @@ import multiprocessing as mp
 from turtle import pos, position
 import numpy as np
 from datasets import load_dataset # pip install datasets
+from sympy import use
 from tqdm import tqdm # pip install tqdm
+
+from config import GPT_config
 
 from transformers import AutoTokenizer
 
@@ -31,73 +34,125 @@ fw = load_dataset("HuggingFaceFW/fineweb-edu", name=remote_name, split="train")
 tokenizer = AutoTokenizer.from_pretrained("allenai/OLMo-1B-hf")
 
 # init the tokenizer
-def tokenize(doc):
+def tokenize(doc, use_rope=False):
     tokens = []
-    tokens.extend(tokenizer(doc["text"]).input_ids)
+    if use_rope:
+        tokens.extend(tokenizer(doc["text"]).input_ids)
+        max_content_size = 1024
+        if len(tokens) >= max_content_size:
+            tokens = tokens[:max_content_size]
+            tokens[-1] = tokenizer.eos_token_id
+        else:
+            tokens.append(tokenizer.eos_token_id)
 
-    max_content_size = 1024
-    if len(tokens) >= max_content_size:
-        tokens = tokens[:max_content_size]
-        tokens[-1] = tokenizer.eos_token_id
-    else:
-        tokens.append(tokenizer.eos_token_id)
+        tokens_np = np.array(tokens)
 
-    tokens_np = np.array(tokens)
+        positions_np_uint16 = np.arange(len(tokens_np), dtype=np.uint16)
 
-    positions_np_uint16 = np.arange(len(tokens_np), dtype=np.uint16)
+        assert (0 <= tokens_np).all() and (tokens_np < 2**16).all(), "token dictionary too large for uint16"
+        tokens_np_uint16 = tokens_np.astype(np.uint16)
 
-    assert (0 <= tokens_np).all() and (tokens_np < 2**16).all(), "token dictionary too large for uint16"
-    tokens_np_uint16 = tokens_np.astype(np.uint16)
+        return tokens_np_uint16, positions_np_uint16
+    else: 
+        tokens = [tokenizer.eos_token_id]
+        tokens.extend(tokenizer(doc["text"]).input_ids)
+        tokens_np = np.array(tokens)
+        assert (0 <= tokens_np).all() and (tokens_np < 2**16).all(), "token dictionary too large for uint16"
+        tokens_np_uint16 = tokens_np.astype(np.uint16)
+    return tokens_np_uint16
 
-    return tokens_np_uint16, positions_np_uint16
-
-def write_datafile(filename, tokens_np, positions_np):
+def write_datafile_rope(filename, tokens_np, positions_np):
     np.savez(filename, tokens=tokens_np, positions=positions_np)
+    
+def write_datafile(filename, tokens_np):
+    np.save(filename, tokens_np)
 
 # tokenize all documents and write output shards, each of shard_size tokens (last shard has remainder)
 
 nprocs = max(1, os.cpu_count()//2)  # type: ignore
-with mp.Pool(nprocs) as pool:
-    shard_index = 0
-    # preallocate buffer to hold current shard
-    all_tokens_np = np.empty((shard_size,), dtype=np.uint16)
-    all_positions_np = np.empty((shard_size,), dtype=np.uint16)
-    token_count = 0
-    progress_bar = None
 
-    for tokens, positions in pool.imap(tokenize, fw, chunksize=16):
+use_rope = GPT_config.using_rope
 
-        # is there enough space in the current shard for the new tokens?
-        if token_count + len(tokens) < shard_size:
-            # simply append tokens to current shard
-            all_tokens_np[token_count:token_count+len(tokens)] = tokens
-            all_positions_np[token_count:token_count+len(positions)] = positions
-            token_count += len(tokens)
-            # update progress bar
-            if progress_bar is None:
-                progress_bar = tqdm(total=shard_size, unit="tokens", desc=f"Shard {shard_index}")
-            progress_bar.update(len(tokens))
-        else:
-            # write the current shard and start a new one
+if use_rope:
+    with mp.Pool(nprocs) as pool:
+        shard_index = 0
+        # preallocate buffer to hold current shard
+        all_tokens_np = np.empty((shard_size,), dtype=np.uint16)
+        all_positions_np = np.empty((shard_size,), dtype=np.uint16)
+        token_count = 0
+        progress_bar = None
+
+        for tokens, positions in pool.imap(tokenize, fw, chunksize=16):
+
+            # is there enough space in the current shard for the new tokens?
+            if token_count + len(tokens) < shard_size:
+                # simply append tokens to current shard
+                all_tokens_np[token_count:token_count+len(tokens)] = tokens
+                all_positions_np[token_count:token_count+len(positions)] = positions
+                token_count += len(tokens)
+                # update progress bar
+                if progress_bar is None:
+                    progress_bar = tqdm(total=shard_size, unit="tokens", desc=f"Shard {shard_index}")
+                progress_bar.update(len(tokens))
+            else:
+                # write the current shard and start a new one
+                split = "val" if shard_index == 0 else "train"
+                filename = os.path.join(DATA_CACHE_DIR, f"edufineweb_{split}_{shard_index:06d}")
+                # split the document into whatever fits in this shard; the remainder goes to next one
+                remainder = shard_size - token_count
+                progress_bar.update(remainder)  # type: ignore
+        
+                all_tokens_np[token_count:token_count+remainder] = tokens[:remainder]
+                all_positions_np[token_count:token_count+remainder] = positions[:remainder]
+                write_datafile_rope(filename, all_tokens_np, all_positions_np)
+
+                shard_index += 1 
+                progress_bar = None
+                # populate the next shard with the leftovers of the current doc
+                all_tokens_np[0:len(tokens)-remainder] = tokens[remainder:]
+                all_positions_np[0:len(positions)-remainder] = positions[remainder:]
+                token_count = len(tokens)-remainder
+
+        # write any remaining tokens as the last shard
+        if token_count != 0:
             split = "val" if shard_index == 0 else "train"
             filename = os.path.join(DATA_CACHE_DIR, f"edufineweb_{split}_{shard_index:06d}")
-            # split the document into whatever fits in this shard; the remainder goes to next one
-            remainder = shard_size - token_count
-            progress_bar.update(remainder)  # type: ignore
-    
-            all_tokens_np[token_count:token_count+remainder] = tokens[:remainder]
-            all_positions_np[token_count:token_count+remainder] = positions[:remainder]
-            write_datafile(filename, all_tokens_np, all_positions_np)
+            write_datafile_rope(filename, all_tokens_np[:token_count], all_positions_np[:token_count])
+else:
+    with mp.Pool(nprocs) as pool:
+        shard_index = 0
+        # preallocate buffer to hold current shard
+        all_tokens_np = np.empty((shard_size,), dtype=np.uint16)
+        token_count = 0
+        progress_bar = None
+        for tokens in pool.imap(tokenize, fw, chunksize=16):
 
-            shard_index += 1 
-            progress_bar = None
-            # populate the next shard with the leftovers of the current doc
-            all_tokens_np[0:len(tokens)-remainder] = tokens[remainder:]
-            all_positions_np[0:len(positions)-remainder] = positions[remainder:]
-            token_count = len(tokens)-remainder
+            # is there enough space in the current shard for the new tokens?
+            if token_count + len(tokens) < shard_size:
+                # simply append tokens to current shard
+                all_tokens_np[token_count:token_count+len(tokens)] = tokens
+                token_count += len(tokens)
+                # update progress bar
+                if progress_bar is None:
+                    progress_bar = tqdm(total=shard_size, unit="tokens", desc=f"Shard {shard_index}")
+                progress_bar.update(len(tokens))
+            else:
+                # write the current shard and start a new one
+                split = "val" if shard_index == 0 else "train"
+                filename = os.path.join(DATA_CACHE_DIR, f"edufineweb_{split}_{shard_index:06d}")
+                # split the document into whatever fits in this shard; the remainder goes to next one
+                remainder = shard_size - token_count
+                progress_bar.update(remainder)  # type: ignore
+                all_tokens_np[token_count:token_count+remainder] = tokens[:remainder]
+                write_datafile(filename, all_tokens_np)
+                shard_index += 1
+                progress_bar = None
+                # populate the next shard with the leftovers of the current doc
+                all_tokens_np[0:len(tokens)-remainder] = tokens[remainder:]
+                token_count = len(tokens)-remainder
 
-    # write any remaining tokens as the last shard
-    if token_count != 0:
-        split = "val" if shard_index == 0 else "train"
-        filename = os.path.join(DATA_CACHE_DIR, f"edufineweb_llamatokens_{split}_{shard_index:06d}")
-        write_datafile(filename, all_tokens_np[:token_count], all_positions_np[:token_count])
+        # write any remaining tokens as the last shard
+        if token_count != 0:
+            split = "val" if shard_index == 0 else "train"
+            filename = os.path.join(DATA_CACHE_DIR, f"edufineweb_{split}_{shard_index:06d}")
+            write_datafile(filename, all_tokens_np[:token_count])

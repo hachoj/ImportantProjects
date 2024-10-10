@@ -10,3 +10,4 @@ class GPT_config:
     n_layer:int = 12
     n_head:int = 12
     n_embd:int = 768
+    using_rope:bool = False

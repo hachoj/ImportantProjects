@@ -13,9 +13,7 @@ class SLM(nn.Module):
 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
-
-            # trying RoPE embeddings
-            # wpe = nn.Embeding(config.block_size, config.n_embd),
+            wpe = nn.Embedding(config.block_size, config.n_embd),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = nn.LayerNorm(config.n_embd)
         ))
@@ -36,17 +34,21 @@ class SLM(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
      
-    def forward(self, idx, targets=None, positions=None):
+    def forward(self, idx, targets=None):
         # idx is of shape (B, T)
         B, T = idx.size()
         assert T <= self.config.block_size, "Cannot forward, model block size is exhausted."
         
         # forward the token and position embeddings 
-        x = self.transformer.wte(idx) # token embedding of shape (B, T, n_embd)
+        pos = torch.arange(0, T, dtype=torch.long, device=idx.device) # shape (T)
+        pos_embd = self.transformer.wpe(pos)
+        
+        tok_embd = self.transformer.wte(idx) # token embedding of shape (B, T, n_embd)
+        x = tok_embd + pos_embd
     
         # froward the blocks of the transformer
         for block in self.transformer.h:
-            x = block(x, positions)
+            x = block(x)
         # forward the final layer norm and the classifier 
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x) # (B, T, vocab_size)

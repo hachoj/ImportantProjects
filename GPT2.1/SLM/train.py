@@ -113,11 +113,13 @@ if __name__ == '__main__':
                 val_loss_accum = 0.0
                 val_loss_steps = 20
                 for _ in range(val_loss_steps):
-                    x, y, pos = val_loader.next_batch()
-                    x, y, pos = x.to(device), y.to(device), pos.to(device)
+                    # x, y, pos = val_loader.next_batch()
+                    # x, y, pos = x.to(device), y.to(device), pos.to(device)
+                    x, y = val_loader.next_batch()
+                    x, y = x.to(device), y.to(device)
 
                     with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-                        logits, loss = model(x, y, pos)
+                        logits, loss = model(x, y)
                     loss = loss / val_loss_steps
                     val_loss_accum += loss.detach()
             if ddp:
@@ -177,10 +179,10 @@ if __name__ == '__main__':
         optimizer.zero_grad()
         loss_accum = 0.0  # this is just for printing the loss
         for microstep in range(grad_accum_steps):
-            x, y, pos = train_loader.next_batch()
-            x, y, pos = x.to(device), y.to(device), pos.to(device)
+            x, y = train_loader.next_batch()
+            x, y = x.to(device), y.to(device)
             with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                logits, loss = model(x, y, pos)
+                logits, loss = model(x, y)
             # each loss.backward() call accumulates gradients
             loss = loss / grad_accum_steps # scale the loss for the gradient accumulation
             loss_accum += loss.detach()
