@@ -13,7 +13,7 @@ from lr_schedular import get_lr
 from hellaswag import *
 
 if __name__ == '__main__':
-    model_name = "SLM-0.124B_control_take_2"
+    model_name = "SLM-0.124B_final_control_model"
 
     # ----------------------------------------------------------------------
     # Setting up DDP
@@ -78,7 +78,7 @@ if __name__ == '__main__':
     '''
     max_lr = 6e-4
     min_lr = max_lr * 0.1
-    warmup_steps = 400
+    warmup_steps = 715
     max_steps = 19073
 
     optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)

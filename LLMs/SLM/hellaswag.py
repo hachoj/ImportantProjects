@@ -128,9 +128,10 @@ def iterate_examples(split):
 def evaluate(device):
 
     torch.set_float32_matmul_precision('high') # use tf32
-    # model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-1B-hf")
-    model = SLM(GPT_config)
-    model.load_state_dict(torch.load("logs/model_SLM-0.124B_random_test.pt", weights_only=True))
+    model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-1B-hf")
+    # model = SLM(GPT_config)
+    # model.load_state_dict(torch.load("logs/model_SLM-0.124B_random_test.pt", weights_only=True))
+    
     model.to(device)
     model = torch.compile(model) # optionally torch compile the model
     model.eval()
@@ -144,9 +145,9 @@ def evaluate(device):
         mask = mask.to(device)
 
         # get the logits
-        # logits = model(tokens).logits
+        logits = model(tokens).logits
         
-        logits = model(tokens)[0]
+        # logits = model(tokens)[0]
 
         # evaluate the autoregressive loss at all positions
         shift_logits = (logits[..., :-1, :]).contiguous()

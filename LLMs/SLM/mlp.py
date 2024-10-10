@@ -10,13 +10,15 @@ class MLP(nn.Module):
         super().__init__()
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
         # self.swiglu = swiglu(4 * config.n_embd)
-        self.swish = nn.SiLU()
+        self.gelu = nn.GELU(approximate='tanh')
+        # self.swish = nn.SiLU()
         self.c_proj = nn.Linear(config.n_embd * 4, config.n_embd)
         self.c_proj.REGULARIZE = 1 # type: ignore
 
     def forward(self, x):
         x = self.c_fc(x)
         # x = self.swiglu(x)
-        x = self.swish(x)
+        # x = self.swish(x)
+        x = self.gelu(x)
         x = self.c_proj(x)
         return x

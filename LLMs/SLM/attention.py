@@ -1,12 +1,9 @@
-from ctypes import pointer
-from turtle import pos
-from pyparsing import PositionToken
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 # this is for an easy PyTorch implementation of RoPE 
-import torchtune.modules as ttm
+# import torchtune.modules as ttm
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):

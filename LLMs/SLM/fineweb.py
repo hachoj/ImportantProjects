@@ -10,10 +10,8 @@ Will save shards to the local directory "edu_fineweb10B".
 from math import trunc
 import os
 import multiprocessing as mp
-from turtle import pos, position
 import numpy as np
 from datasets import load_dataset # pip install datasets
-from sympy import use
 from tqdm import tqdm # pip install tqdm
 
 from config import GPT_config
