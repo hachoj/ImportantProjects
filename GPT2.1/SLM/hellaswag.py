@@ -27,12 +27,16 @@ The validation set of HellaSwag has a total of 10,042 examples.
 
 import os
 import json
+from matplotlib.font_manager import weight_dict
 import requests
 from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
+from model import SLM
+from config import GPT_config
 
 # -----------------------------------------------------------------------------
 DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), "hellaswag")
@@ -124,9 +128,12 @@ def iterate_examples(split):
 def evaluate(device):
 
     torch.set_float32_matmul_precision('high') # use tf32
-    model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-1B-hf")
+    # model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-1B-hf")
+    model = SLM(GPT_config)
+    model.load_state_dict(torch.load("logs/model_SLM-0.124B_random_test.pt", weights_only=True))
     model.to(device)
     model = torch.compile(model) # optionally torch compile the model
+    model.eval()
 
     num_correct_norm = 0
     num_correct = 0
@@ -137,7 +144,10 @@ def evaluate(device):
         mask = mask.to(device)
 
         # get the logits
-        logits = model(tokens).logits
+        # logits = model(tokens).logits
+        
+        logits = model(tokens)[0]
+
         # evaluate the autoregressive loss at all positions
         shift_logits = (logits[..., :-1, :]).contiguous()
         shift_tokens = (tokens[..., 1:]).contiguous()

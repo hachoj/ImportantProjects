@@ -13,7 +13,7 @@ from lr_schedular import get_lr
 from hellaswag import *
 
 if __name__ == '__main__':
-    model_name = "SLM-0.124B"
+    model_name = "SLM-0.124B_control_take_2"
 
     # ----------------------------------------------------------------------
     # Setting up DDP
@@ -54,7 +54,7 @@ if __name__ == '__main__':
     # calculate the number of gradient accumulation steps
     # for the desired batch size
     total_batch_size = 524288
-    B=4
+    B=64
     T=1024
     assert total_batch_size % (B * T * ddp_world_size) == 0
     grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
@@ -79,7 +79,7 @@ if __name__ == '__main__':
     max_lr = 6e-4
     min_lr = max_lr * 0.1
     warmup_steps = 400
-    max_steps = 19073 
+    max_steps = 19073
 
     optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
 
@@ -206,8 +206,9 @@ if __name__ == '__main__':
             print(f"step {step:5d} | loss: {loss_accum.item():.6f} | lr {lr:.4e} | norm: {norm:.4f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f}")  # type: ignore
             with open(log_file, "a") as f:
                 f.write(f"{step} train {loss_accum.item():.6f}\n")  # type: ignore
-
+    if master_process:
+        log_dir = "logs"
+        checkpoint_path = os.path.join(log_dir, f"model_{model_name}.pt")
+        torch.save(model.state_dict(), checkpoint_path)
     if ddp:
         destroy_process_group()
-
-    torch.save(model.state_dict(), f"models/{model_name}.pth")
