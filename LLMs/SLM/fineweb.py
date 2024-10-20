@@ -32,22 +32,18 @@ fw = load_dataset("HuggingFaceFW/fineweb-edu", name=remote_name, split="train")
 tokenizer = AutoTokenizer.from_pretrained("allenai/OLMo-1B-hf")
 
 # init the tokenizer
-def tokenize(doc, use_rope=False):
+def tokenize(doc, context_aware=False):
     tokens = []
-    if use_rope:
+    if context_aware:
+        # gets the position of a token relative to the example being loaded
         tokens.extend(tokenizer(doc["text"]).input_ids)
-        max_content_size = 1024
-        if len(tokens) >= max_content_size:
-            tokens = tokens[:max_content_size]
-            tokens[-1] = tokenizer.eos_token_id
-        else:
-            tokens.append(tokenizer.eos_token_id)
+        tokens.append(tokenizer.eos_token_id)
 
         tokens_np = np.array(tokens)
 
         positions_np_uint16 = np.arange(len(tokens_np), dtype=np.uint16)
 
-        assert (0 <= tokens_np).all() and (tokens_np < 2**16).all(), "token dictionary too large for uint16"
+        assert (tokens_np >= 0).all() and (tokens_np < 2**16).all(), "token dictionary too large for uint16"
         tokens_np_uint16 = tokens_np.astype(np.uint16)
 
         return tokens_np_uint16, positions_np_uint16
@@ -55,11 +51,11 @@ def tokenize(doc, use_rope=False):
         tokens = [tokenizer.eos_token_id]
         tokens.extend(tokenizer(doc["text"]).input_ids)
         tokens_np = np.array(tokens)
-        assert (0 <= tokens_np).all() and (tokens_np < 2**16).all(), "token dictionary too large for uint16"
+        assert (tokens_np >= 0).all() and (tokens_np < 2**16).all(), "token dictionary too large for uint16"
         tokens_np_uint16 = tokens_np.astype(np.uint16)
     return tokens_np_uint16
 
-def write_datafile_rope(filename, tokens_np, positions_np):
+def write_datafile_context_aware(filename, tokens_np, positions_np):
     np.savez(filename, tokens=tokens_np, positions=positions_np)
     
 def write_datafile(filename, tokens_np):
@@ -69,9 +65,9 @@ def write_datafile(filename, tokens_np):
 
 nprocs = max(1, os.cpu_count()//2)  # type: ignore
 
-use_rope = GPT_config.using_rope
+context_aware = GPT_config.pos_embd_type == 'ROPE'
 
-if use_rope:
+if context_aware:
     with mp.Pool(nprocs) as pool:
         shard_index = 0
         # preallocate buffer to hold current shard
@@ -102,7 +98,7 @@ if use_rope:
         
                 all_tokens_np[token_count:token_count+remainder] = tokens[:remainder]
                 all_positions_np[token_count:token_count+remainder] = positions[:remainder]
-                write_datafile_rope(filename, all_tokens_np, all_positions_np)
+                write_datafile_context_aware(filename, all_tokens_np, all_positions_np)
 
                 shard_index += 1 
                 progress_bar = None
@@ -115,7 +111,7 @@ if use_rope:
         if token_count != 0:
             split = "val" if shard_index == 0 else "train"
             filename = os.path.join(DATA_CACHE_DIR, f"edufineweb_{split}_{shard_index:06d}")
-            write_datafile_rope(filename, all_tokens_np[:token_count], all_positions_np[:token_count])
+            write_datafile_context_aware(filename, all_tokens_np[:token_count], all_positions_np[:token_count])
 else:
     with mp.Pool(nprocs) as pool:
         shard_index = 0

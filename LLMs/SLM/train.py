@@ -13,7 +13,7 @@ from lr_schedular import get_lr
 from hellaswag import *
 
 if __name__ == '__main__':
-    model_name = "SLM-0.124B_final_control_model"
+    model_name = "SLM-0.124B_random_testing"
 
     # ----------------------------------------------------------------------
     # Setting up DDP
@@ -54,18 +54,22 @@ if __name__ == '__main__':
     # calculate the number of gradient accumulation steps
     # for the desired batch size
     total_batch_size = 524288
-    B=64
+    B=4
     T=1024
     assert total_batch_size % (B * T * ddp_world_size) == 0
     grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
 
 
-    train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train')
-    val_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val')
+    train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train', is_rope=GPT_config.pos_embd_type == 'ROPE')
+    print('here?')
+    val_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val', is_rope=GPT_config.pos_embd_type == 'ROPE')
+    print('here?')
 
     torch.set_float32_matmul_precision('high')
 
+    print('here?')
     model = SLM(GPT_config)
+    print('or here?')
     model.to(device)
     # model = torch.compile(model)
     if ddp:
@@ -113,13 +117,12 @@ if __name__ == '__main__':
                 val_loss_accum = 0.0
                 val_loss_steps = 20
                 for _ in range(val_loss_steps):
-                    # x, y, pos = val_loader.next_batch()
-                    # x, y, pos = x.to(device), y.to(device), pos.to(device)
-                    x, y = val_loader.next_batch()
+                    x, y, pos = val_loader.next_batch()
+                    if pos is not None:
+                        pos = pos.to(device)
                     x, y = x.to(device), y.to(device)
-
                     with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-                        logits, loss = model(x, y)
+                        logits, loss = model(x, y, pos)
                     loss = loss / val_loss_steps
                     val_loss_accum += loss.detach()
             if ddp:
@@ -179,10 +182,12 @@ if __name__ == '__main__':
         optimizer.zero_grad()
         loss_accum = 0.0  # this is just for printing the loss
         for microstep in range(grad_accum_steps):
-            x, y = train_loader.next_batch()
+            x, y, pos = train_loader.next_batch()
+            if pos is not None:
+                pos = pos.to(device)
             x, y = x.to(device), y.to(device)
             with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                logits, loss = model(x, y)
+                logits, loss = model(x, y, pos)
             # each loss.backward() call accumulates gradients
             loss = loss / grad_accum_steps # scale the loss for the gradient accumulation
             loss_accum += loss.detach()

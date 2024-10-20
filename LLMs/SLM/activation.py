@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class swiglu(nn.Module):
+class SwiGLU(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
         # combine the two weight matrices into one
