@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -197,7 +196,8 @@ if __name__ == '__main__':
             x, y = x.to(device), y.to(device)
             with torch.autocast(device_type=device, dtype=torch.bfloat16):
                 student_logits, _ = model(x, y, pos)
-                teacher_logits = teacher_model(x, use_cache=False).logits[:, :, :50280]
+                with torch.no_grad():
+                    teacher_logits = teacher_model(x, use_cache=False).logits[:, :, :50280]
             # each loss.backward() call accumulates gradients
             alpha = get_alpha_cosine_decay(step, max_steps, initial_alpha=max_alpha, final_alpha=min_alpha)
             loss = reverse_kl_divergence(student_logits, teacher_logits, temperature=1.0, alpha=alpha, length_penalty=length_penalty)
