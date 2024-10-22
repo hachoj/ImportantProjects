@@ -12,12 +12,14 @@ from model import SLM
 from lr_schedular import get_lr
 from hellaswag import *
 
+from transformers import AutoModelForCausalLM
+
 if __name__ == '__main__':
     model_name = "SLM-0.124B_random_testing"
 
     # ----------------------------------------------------------------------
     # Setting up DDP
-    # torchrun --standalone --nproc_per_node=NUMGPUS train.py
+    # torchrun --standalone --nproc_per_node=NUMGPUS train_KD.py
 
     from torch.distributed import init_process_group, destroy_process_group
     from torch.nn.parallel import DistributedDataParallel as DDP
@@ -67,9 +69,15 @@ if __name__ == '__main__':
 
     model = SLM(GPT_config)
     model.to(device)
+
+    # Import allenai/OLMo-1B-hf model as teacher
+    teacher_model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-1B-hf")
+    teacher_model.to(device)
+
     # model = torch.compile(model)
     if ddp:
         model = DDP(model, device_ids=[ddp_local_rank])
+        teacher_model = DDP(teacher_model, device_ids=[ddp_local_rank])
     raw_model = model.module if ddp else model    
 
     # taken from GPT-3 paper
