@@ -14,8 +14,8 @@ model = SLM(config)
 model.load_state_dict(checkpoint["model"])
 step = checkpoint["step"]
 
-teacher = AutoModelForCausalLM.from_pretrained("allenai/OLMo-1B-hf")
-tok = AutoTokenizer.from_pretrained("allenai/OLMo-1B-hf")
+teacher = AutoModelForCausalLM.from_pretrained("allenai/OLMo-7B-hf")
+tok = AutoTokenizer.from_pretrained("allenai/OLMo-7B-hf")
 
 device = 'cuda'
 

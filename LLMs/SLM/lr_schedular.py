@@ -28,3 +28,19 @@ def get_alpha_cosine_decay(current_step, total_steps, initial_alpha=0.9, final_a
     # Cosine decay from initial_alpha to final_alpha
     alpha = final_alpha + 0.5 * (initial_alpha - final_alpha) * (1 + math.cos(math.pi * progress))
     return alpha
+
+def cosine_lr_kld(current_step, total_steps, initial_lr=2e-4, min_lr=1e-5):
+    """
+    Computes the learning rate using cosine decay for reverse KLD distillation.
+    
+    Args:
+    - current_step: Current training step.
+    - total_steps: Total number of steps in training.
+    - initial_lr: Starting learning rate (e.g., 2e-4).
+    - min_lr: Minimum learning rate at the end of training (e.g., 1e-5).
+    
+    Returns:
+    - Learning rate for the current step.
+    """
+    progress = current_step / total_steps
+    return min_lr + 0.5 * (initial_lr - min_lr) * (1 + math.cos(math.pi * progress))

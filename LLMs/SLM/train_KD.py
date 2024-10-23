@@ -8,7 +8,7 @@ import os
 from config import GPT_config
 from data_loader import DataLoaderLite
 from model import SLM
-from lr_schedular import get_lr, get_alpha_cosine_decay
+from lr_schedular import get_lr, get_alpha_cosine_decay, cosine_lr_kld
 from hellaswag import *
 from loss import reverse_kl_divergence
 
@@ -67,13 +67,15 @@ if __name__ == '__main__':
 
     torch.set_float32_matmul_precision('high')
 
+    # model = SLM(GPT_config)
+    checkpoint = torch.load("logs/model_SLM-0.124B_final_control_model_19072.pt", weights_only=False)
     model = SLM(GPT_config)
+    model.load_state_dict(checkpoint["model"])
     model.to(device)
 
     # Import allenai/OLMo-1B-hf model as teacher
-    teacher_model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-1B-hf")
+    teacher_model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-7B-hf")
     teacher_model.to(device)
-    teacher_model.eval()
 
     # model = torch.compile(model)
     if ddp:
@@ -85,15 +87,18 @@ if __name__ == '__main__':
     '''
     TRAINING PARAMS
     '''
-    max_lr = 6e-4
-    min_lr = max_lr * 0.1
+    # Because we are fine tuning with reverseKLD the min and max learning rate will be lowered
+    max_lr = 2e-4
+    min_lr = 1e-5
     max_alpha = 0.9
     min_alpha = 0.1
     length_penalty = 1.0
-    warmup_steps = 715
-    max_steps = 19073
+    # warmup_steps = 715
+    max_steps = 19073 // 5  # roughly 2 Billion tokens on 8 GPUS
 
-    optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
+    tempurature = 2.0
+
+    optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=max_lr, device=device)
 
     # create the log directory we will write checkpoints to and log to
     log_dir = "logs"
@@ -118,72 +123,72 @@ if __name__ == '__main__':
         # Model evaluation
         # --------------------------------------------------------------------------------
         # once in a while evaluate our validation loss
-        # if step % 250 == 0 or last_step:
-        #     model.eval()
-        #     val_loader.reset()
-        #     with torch.no_grad():
-        #         val_loss_accum = 0.0
-        #         val_loss_steps = 20
-        #         for _ in range(val_loss_steps):
-        #             x, y, pos = val_loader.next_batch()
-        #             if pos is not None:
-        #                 pos = pos.to(device)
-        #             x, y = x.to(device), y.to(device)
-        #             with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-        #                 logits, loss = model(x, y, pos)
-        #             loss = loss / val_loss_steps
-        #             val_loss_accum += loss.detach()
-        #     if ddp:
-        #         dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
-        #     if master_process:
-        #         print(f"validation loss: {val_loss_accum.item():.4f}") # type: ignore
-        #         with open(log_file, "a") as f:
-        #             f.write(f"{step} val {val_loss_accum.item():.4f}\n")  # type: ignore
-        #         if step > 0 and (step % 5000 == 0 or last_step):
-        #             # optionally write model checkpoints
-        #             checkpoint_path = os.path.join(log_dir, f"model_{model_name}_{step:05d}.pt")
-        #             checkpoint = {
-        #                 'model': raw_model.state_dict(),
-        #                 'config': raw_model.config,
-        #                 'step': step,
-        #                 'val_loss': val_loss_accum.item()  # type: ignore
-        #             }
-        #             # you might also want to add optimizer.state_dict() and
-        #             # rng seeds etc., if you wanted to more exactly resume training
-        #             torch.save(checkpoint, checkpoint_path)
+        if step % 250 == 0 or last_step:
+            model.eval()
+            val_loader.reset()
+            with torch.no_grad():
+                val_loss_accum = 0.0
+                val_loss_steps = 20
+                for _ in range(val_loss_steps):
+                    x, y, pos = val_loader.next_batch()
+                    if pos is not None:
+                        pos = pos.to(device)
+                    x, y = x.to(device), y.to(device)
+                    with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+                        logits, loss = model(x, y, pos)
+                    loss = loss / val_loss_steps
+                    val_loss_accum += loss.detach()
+            if ddp:
+                dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
+            if master_process:
+                print(f"validation loss: {val_loss_accum.item():.4f}") # type: ignore
+                with open(log_file, "a") as f:
+                    f.write(f"{step} val {val_loss_accum.item():.4f}\n")  # type: ignore
+                if step > 0 and (step % 1250 == 0 or last_step):
+                    # optionally write model checkpoints
+                    checkpoint_path = os.path.join(log_dir, f"model_{model_name}_{step:05d}.pt")
+                    checkpoint = {
+                        'model': raw_model.state_dict(),
+                        'config': raw_model.config,
+                        'step': step,
+                        'val_loss': val_loss_accum.item()  # type: ignore
+                    }
+                    # you might also want to add optimizer.state_dict() and
+                    # rng seeds etc., if you wanted to more exactly resume training
+                    torch.save(checkpoint, checkpoint_path)
                 
-        # # HellaSwag evaluation
-        # if (step % 250 == 0 or last_step):
-        #     num_correct_norm = 0
-        #     num_total = 0
-        #     for i, example in enumerate(iterate_examples("val")):
-        #         # only process examples where i % ddp_world_size == ddp_rank
-        #         if i % ddp_world_size != ddp_rank:
-        #             continue
-        #         # render the example into tokens and labels
-        #         _, tokens, mask, label = render_example(example)
-        #         tokens = tokens.to(device)
-        #         mask = mask.to(device)
-        #         # get the logits
-        #         with torch.no_grad():
-        #             with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-        #                 logits, loss = model(tokens)
-        #             pred_norm = get_most_likely_row(tokens, mask, logits)
-        #         num_total += 1
-        #         num_correct_norm += int(pred_norm == label)
-        #     # reduce the stats across all processes
-        #     if ddp:
-        #         num_total = torch.tensor(num_total, dtype=torch.long, device=device)
-        #         num_correct_norm = torch.tensor(num_correct_norm, dtype=torch.long, device=device)
-        #         dist.all_reduce(num_total, op=dist.ReduceOp.SUM)
-        #         dist.all_reduce(num_correct_norm, op=dist.ReduceOp.SUM)
-        #         num_total = num_total.item()
-        #         num_correct_norm = num_correct_norm.item()
-        #     acc_norm = num_correct_norm / num_total
-        #     if master_process:
-        #         print(f"HellaSwag accuracy: {num_correct_norm}/{num_total}={acc_norm:.4f}")
-        #         with open(log_file, "a") as f:
-        #             f.write(f"{step} hella {acc_norm:.4f}\n")
+        # HellaSwag evaluation
+        if (step % 250 == 0 or last_step):
+            num_correct_norm = 0
+            num_total = 0
+            for i, example in enumerate(iterate_examples("val")):
+                # only process examples where i % ddp_world_size == ddp_rank
+                if i % ddp_world_size != ddp_rank:
+                    continue
+                # render the example into tokens and labels
+                _, tokens, mask, label = render_example(example)
+                tokens = tokens.to(device)
+                mask = mask.to(device)
+                # get the logits
+                with torch.no_grad():
+                    with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+                        logits, loss = model(tokens)
+                    pred_norm = get_most_likely_row(tokens, mask, logits)
+                num_total += 1
+                num_correct_norm += int(pred_norm == label)
+            # reduce the stats across all processes
+            if ddp:
+                num_total = torch.tensor(num_total, dtype=torch.long, device=device)
+                num_correct_norm = torch.tensor(num_correct_norm, dtype=torch.long, device=device)
+                dist.all_reduce(num_total, op=dist.ReduceOp.SUM)
+                dist.all_reduce(num_correct_norm, op=dist.ReduceOp.SUM)
+                num_total = num_total.item()
+                num_correct_norm = num_correct_norm.item()
+            acc_norm = num_correct_norm / num_total
+            if master_process:
+                print(f"HellaSwag accuracy: {num_correct_norm}/{num_total}={acc_norm:.4f}")
+                with open(log_file, "a") as f:
+                    f.write(f"{step} hella {acc_norm:.4f}\n")
         # --------------------------------------------------------------------------------
 
         model.train()
@@ -200,7 +205,7 @@ if __name__ == '__main__':
                     teacher_logits = teacher_model(x, use_cache=False).logits[:, :, :50280]
             # each loss.backward() call accumulates gradients
             alpha = get_alpha_cosine_decay(step, max_steps, initial_alpha=max_alpha, final_alpha=min_alpha)
-            loss = reverse_kl_divergence(student_logits, teacher_logits, temperature=1.0, alpha=alpha, length_penalty=length_penalty)
+            loss = reverse_kl_divergence(student_logits, teacher_logits, temperature=tempurature, alpha=alpha, length_penalty=length_penalty)
             loss = loss / grad_accum_steps # scale the loss for the gradient accumulation
             loss_accum += loss.detach()
             if ddp:
@@ -212,7 +217,8 @@ if __name__ == '__main__':
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
         # vairable learning rate
-        lr = get_lr(step, warmup_steps, max_steps, min_lr, max_lr)
+        # lr = get_lr(step, warmup_steps, max_steps, min_lr, max_lr)
+        lr = cosine_lr_kld(step, max_steps, initial_lr=max_lr, min_lr=min_lr)
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
         optimizer.step()

@@ -62,7 +62,7 @@ hellaswags = {
     "test": "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_test.jsonl",
 }
 
-tokenizer = AutoTokenizer.from_pretrained("allenai/OLMo-1B-hf")
+tokenizer = AutoTokenizer.from_pretrained("allenai/OLMo-7B-hf")
 
 def download(split):
     """Downloads HellaSwag DATA_CACHE_DIR"""
@@ -128,7 +128,7 @@ def iterate_examples(split):
 def evaluate(device):
 
     torch.set_float32_matmul_precision('high') # use tf32
-    model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-1B-hf")
+    model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-7B-hf")
     # model = SLM(GPT_config)
     # model.load_state_dict(torch.load("logs/model_SLM-0.124B_random_test.pt", weights_only=True))
     
