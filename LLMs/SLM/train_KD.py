@@ -19,7 +19,7 @@ if __name__ == '__main__':
 
     # ----------------------------------------------------------------------
     # Setting up DDP
-    # torchrun --standalone --nproc_per_node=NUMGPUS train_KD.py
+    # torchrun --standalone --nproc_per_node=8 train_KD.py
 
     from torch.distributed import init_process_group, destroy_process_group
     from torch.nn.parallel import DistributedDataParallel as DDP
@@ -56,11 +56,10 @@ if __name__ == '__main__':
     # calculate the number of gradient accumulation steps
     # for the desired batch size
     total_batch_size = 524288
-    B=1
+    B=16
     T=1024
     assert total_batch_size % (B * T * ddp_world_size) == 0
     grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
-
 
     train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train', is_rope=GPT_config.pos_embd_type == 'ROPE')
     val_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val', is_rope=GPT_config.pos_embd_type == 'ROPE')
@@ -74,7 +73,7 @@ if __name__ == '__main__':
     model.to(device)
 
     # Import allenai/OLMo-1B-hf model as teacher
-    teacher_model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-7B-hf")
+    teacher_model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-1B-hf")
     teacher_model.to(device)
 
     # model = torch.compile(model)
@@ -88,7 +87,7 @@ if __name__ == '__main__':
     TRAINING PARAMS
     '''
     # Because we are fine tuning with reverseKLD the min and max learning rate will be lowered
-    max_lr = 2e-4
+    max_lr = 2.5e-4
     min_lr = 1e-5
     max_alpha = 0.9
     min_alpha = 0.1
@@ -96,9 +95,9 @@ if __name__ == '__main__':
     # warmup_steps = 715
     max_steps = 19073 // 5  # roughly 2 Billion tokens on 8 GPUS
 
-    tempurature = 2.0
+    tempurature = 2.5
 
-    optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=max_lr, device=device)
+    optimizer = raw_model.configure_optimizers(weight_decay=0.05, learning_rate=max_lr, device=device)
 
     # create the log directory we will write checkpoints to and log to
     log_dir = "logs"
@@ -123,19 +122,21 @@ if __name__ == '__main__':
         # Model evaluation
         # --------------------------------------------------------------------------------
         # once in a while evaluate our validation loss
-        if step % 250 == 0 or last_step:
+        if step % 100 == 0 or last_step:
             model.eval()
             val_loader.reset()
             with torch.no_grad():
                 val_loss_accum = 0.0
                 val_loss_steps = 20
                 for _ in range(val_loss_steps):
-                    x, y, pos = val_loader.next_batch()
-                    if pos is not None:
-                        pos = pos.to(device)
+                    # x, y, pos = val_loader.next_batch()
+                    # if pos is not None:
+                    #     pos = pos.to(device)
+                    x, y = val_loader.next_batch()
                     x, y = x.to(device), y.to(device)
                     with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-                        logits, loss = model(x, y, pos)
+                        logits, loss = model(x, y)
+                        # logits, loss = model(x, y, pos)
                     loss = loss / val_loss_steps
                     val_loss_accum += loss.detach()
             if ddp:
@@ -144,7 +145,7 @@ if __name__ == '__main__':
                 print(f"validation loss: {val_loss_accum.item():.4f}") # type: ignore
                 with open(log_file, "a") as f:
                     f.write(f"{step} val {val_loss_accum.item():.4f}\n")  # type: ignore
-                if step > 0 and (step % 1250 == 0 or last_step):
+                if step > 0 and (step % 500 == 0 or last_step):
                     # optionally write model checkpoints
                     checkpoint_path = os.path.join(log_dir, f"model_{model_name}_{step:05d}.pt")
                     checkpoint = {
@@ -158,7 +159,7 @@ if __name__ == '__main__':
                     torch.save(checkpoint, checkpoint_path)
                 
         # HellaSwag evaluation
-        if (step % 250 == 0 or last_step):
+        if (step % 100 == 0 or last_step):
             num_correct_norm = 0
             num_total = 0
             for i, example in enumerate(iterate_examples("val")):
@@ -195,12 +196,14 @@ if __name__ == '__main__':
         optimizer.zero_grad()
         loss_accum = 0.0  # this is just for printing the loss
         for microstep in range(grad_accum_steps):
-            x, y, pos = train_loader.next_batch()
-            if pos is not None:
-                pos = pos.to(device)
+            # x, y, pos = train_loader.next_batch()
+            # if pos is not None:
+            #     pos = pos.to(device)
+            x, y = train_loader.next_batch()
             x, y = x.to(device), y.to(device)
             with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                student_logits, _ = model(x, y, pos)
+                student_logits, _ = model(x, y)
+                # student_logits, _ = model(x, y, pos)
                 with torch.no_grad():
                     teacher_logits = teacher_model(x, use_cache=False).logits[:, :, :50280]
             # each loss.backward() call accumulates gradients
