@@ -62,7 +62,7 @@ hellaswags = {
     "test": "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_test.jsonl",
 }
 
-tokenizer = AutoTokenizer.from_pretrained("allenai/OLMo-7B-hf")
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-1.5B", trust_remote_code=True)
 
 def download(split):
     """Downloads HellaSwag DATA_CACHE_DIR"""
@@ -127,13 +127,13 @@ def iterate_examples(split):
 @torch.no_grad()
 def evaluate(device):
 
-    torch.set_float32_matmul_precision('high') # use tf32
-    model = AutoModelForCausalLM.from_pretrained("allenai/OLMo-7B-hf")
+    # torch.set_float32_matmul_precision('high') # use tf32
+    model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-1.5B", trust_remote_code=True)
     # model = SLM(GPT_config)
     # model.load_state_dict(torch.load("logs/model_SLM-0.124B_random_test.pt", weights_only=True))
     
     model.to(device)
-    model = torch.compile(model) # optionally torch compile the model
+    # model = torch.compile(model) # optionally torch compile the model
     model.eval()
 
     num_correct_norm = 0
@@ -207,5 +207,5 @@ if __name__ == "__main__":
     # parser.add_argument("-m", "--model_type", type=str, default="gpt2", help="the model type to use")
     parser.add_argument("-d", "--device", type=str, default="cuda", help="the device to use")
     args = parser.parse_args()
-    # evaluate(args.model_type, args.device)
+    evaluate(args.model_type, args.device)
     evaluate(args.device)
