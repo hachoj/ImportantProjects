@@ -1,4 +1,4 @@
-name: lambda_env
+name: aiml 
 channels:
   - pytorch
   - nvidia
