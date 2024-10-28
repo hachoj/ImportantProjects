@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from dataclasses import dataclass
 
 @dataclass
-class GPT_config:
+class config:
     context_len:int = 1024
     vocab_size:int = 50280
     n_layer:int = 12

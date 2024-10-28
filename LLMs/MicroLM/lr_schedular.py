@@ -1,7 +1,9 @@
 import math
 
 def get_lr(it, warmup_steps, max_steps, min_lr, max_lr):
-    # linear warmup followed by cosine decay
+    """
+    cosine decay from max_lr to min_lr with an initial linear warmup
+    """
     if it < warmup_steps:
         return max_lr * (it+1) / warmup_steps
     if it > max_steps:
@@ -13,16 +15,7 @@ def get_lr(it, warmup_steps, max_steps, min_lr, max_lr):
 
 def get_alpha_cosine_decay(current_step, total_steps, initial_alpha=0.9, final_alpha=0.1):
     """
-    Computes the alpha value for the current training step using cosine decay.
-
-    Args:
-    - current_step: The current training step.
-    - total_steps: The total number of training steps.
-    - initial_alpha: The starting value of alpha (typically high, e.g., 0.9 or 1.0).
-    - final_alpha: The ending value of alpha (typically lower, e.g., 0.1).
-
-    Returns:
-    - alpha: The alpha value for the current step.
+    cosine decay from initial_alpha to final_alpha
     """
     progress = current_step / total_steps
     # Cosine decay from initial_alpha to final_alpha
@@ -31,16 +24,7 @@ def get_alpha_cosine_decay(current_step, total_steps, initial_alpha=0.9, final_a
 
 def cosine_lr_kld(current_step, total_steps, initial_lr=2e-4, min_lr=1e-5):
     """
-    Computes the learning rate using cosine decay for reverse KLD distillation.
-    
-    Args:
-    - current_step: Current training step.
-    - total_steps: Total number of steps in training.
-    - initial_lr: Starting learning rate (e.g., 2e-4).
-    - min_lr: Minimum learning rate at the end of training (e.g., 1e-5).
-    
-    Returns:
-    - Learning rate for the current step.
+    cosine decay from initial_lr to min_lr
     """
     progress = current_step / total_steps
     return min_lr + 0.5 * (initial_lr - min_lr) * (1 + math.cos(math.pi * progress))

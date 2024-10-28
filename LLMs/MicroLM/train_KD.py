@@ -5,7 +5,7 @@ import time
 import math
 import os
 
-from config import GPT_config
+from config import config
 from data_loader import DataLoaderLite
 from model import SLM
 from lr_schedular import get_lr, get_alpha_cosine_decay, cosine_lr_kld
@@ -61,14 +61,14 @@ if __name__ == '__main__':
     assert total_batch_size % (B * T * ddp_world_size) == 0
     grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
 
-    train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train', is_rope=GPT_config.pos_embd_type == 'ROPE')
-    val_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val', is_rope=GPT_config.pos_embd_type == 'ROPE')
+    train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train', is_rope=config.pos_embd_type == 'ROPE')
+    val_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val', is_rope=config.pos_embd_type == 'ROPE')
 
     torch.set_float32_matmul_precision('high')
 
-    # model = SLM(GPT_config)
+    # model = SLM(config)
     checkpoint = torch.load("logs/model_SLM-0.124B_final_control_model_19072.pt", weights_only=False)
-    model = SLM(GPT_config)
+    model = SLM(config)
     model.load_state_dict(checkpoint["model"])
     model.to(device)
 
@@ -129,14 +129,11 @@ if __name__ == '__main__':
                 val_loss_accum = 0.0
                 val_loss_steps = 20
                 for _ in range(val_loss_steps):
-                    # x, y, pos = val_loader.next_batch()
-                    # if pos is not None:
-                    #     pos = pos.to(device)
-                    x, y = val_loader.next_batch()
-                    x, y = x.to(device), y.to(device)
+                    x, y, pos = val_loader.next_batch()
+                    if pos is not None:
+                        pos = pos.to(device)
                     with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-                        logits, loss = model(x, y)
-                        # logits, loss = model(x, y, pos)
+                        logits, loss = model(x, y, pos)
                     loss = loss / val_loss_steps
                     val_loss_accum += loss.detach()
             if ddp:
@@ -196,14 +193,11 @@ if __name__ == '__main__':
         optimizer.zero_grad()
         loss_accum = 0.0  # this is just for printing the loss
         for microstep in range(grad_accum_steps):
-            # x, y, pos = train_loader.next_batch()
-            # if pos is not None:
-            #     pos = pos.to(device)
-            x, y = train_loader.next_batch()
-            x, y = x.to(device), y.to(device)
+            x, y, pos = train_loader.next_batch()
+            if pos is not None:
+                pos = pos.to(device)
             with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                student_logits, _ = model(x, y)
-                # student_logits, _ = model(x, y, pos)
+                student_logits, _ = model(x, y, pos)
                 with torch.no_grad():
                     teacher_logits = teacher_model(x, use_cache=False).logits[:, :, :50280]
             # each loss.backward() call accumulates gradients

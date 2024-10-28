@@ -36,7 +36,7 @@ from torch.nn import functional as F
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from model import SLM
-from config import GPT_config
+from config import config
 
 # -----------------------------------------------------------------------------
 DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), "hellaswag")
@@ -129,7 +129,7 @@ def evaluate(device):
 
     torch.set_float32_matmul_precision('high') # use tf32
     model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-1.5B", trust_remote_code=True)
-    # model = SLM(GPT_config)
+    # model = SLM(config)
     # model.load_state_dict(torch.load("logs/model_SLM-0.124B_random_test.pt", weights_only=True))
     
     model.to(device)

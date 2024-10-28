@@ -6,7 +6,7 @@ import time
 import math
 import os
 
-from config import GPT_config
+from config import config
 from data_loader import DataLoaderLite
 from model import SLM
 from lr_schedular import get_lr
@@ -60,14 +60,14 @@ if __name__ == '__main__':
     grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
 
 
-    train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train', is_rope=GPT_config.pos_embd_type == 'ROPE')
-    val_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val', is_rope=GPT_config.pos_embd_type == 'ROPE')
+    train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train', is_rope=config.pos_embd_type == 'ROPE')
+    val_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val', is_rope=config.pos_embd_type == 'ROPE')
 
     torch.set_float32_matmul_precision('high')
 
-    model = SLM(GPT_config)
+    model = SLM(config)
     model.to(device)
-    # model = torch.compile(model)
+    model = torch.compile(model)
     if ddp:
         model = DDP(model, device_ids=[ddp_local_rank])
     raw_model = model.module if ddp else model    

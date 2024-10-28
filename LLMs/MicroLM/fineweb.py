@@ -14,7 +14,7 @@ import numpy as np
 from datasets import load_dataset # pip install datasets
 from tqdm import tqdm # pip install tqdm
 
-from config import GPT_config
+from config import config
 
 from transformers import AutoTokenizer
 
@@ -65,7 +65,7 @@ def write_datafile(filename, tokens_np):
 
 nprocs = max(1, os.cpu_count()//2)  # type: ignore
 
-context_aware = GPT_config.pos_embd_type == 'ROPE'
+context_aware = config.pos_embd_type == 'ROPE'
 
 if context_aware:
     with mp.Pool(nprocs) as pool:

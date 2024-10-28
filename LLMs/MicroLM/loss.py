@@ -3,16 +3,6 @@ import torch.nn.functional as F
 def reverse_kl_divergence(student_logits, teacher_logits, temperature=1.0, alpha=0.9, length_penalty=1.0):
     """
     Computes Reverse KLD (KL(student || teacher)) with teacher-mixed sampling and length normalization.
-
-    Args:
-    - student_logits: Logits from the student model (before softmax)
-    - teacher_logits: Logits from the teacher model (before softmax)
-    - temperature: Scaling factor to soften the distributions
-    - alpha: Mixing ratio for teacher-student distribution (default: 0.9)
-    - length_penalty: Penalty to apply for longer sequences (default: 1.0)
-
-    Returns:
-    - Loss value with reverse KLD, teacher-mixing, and length normalization.
     """
     # Apply temperature scaling
     student_probs = F.log_softmax(student_logits / temperature, dim=-1)
