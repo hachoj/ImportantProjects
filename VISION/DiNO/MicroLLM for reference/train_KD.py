@@ -6,7 +6,7 @@ import math
 import os
 
 from config import config
-from data_loader import DataLoaderLite
+from DiNO.data_loader import DataLoaderLite
 from model import SLM
 from lr_schedular import get_lr, get_alpha_cosine_decay, cosine_lr_kld
 from hellaswag import *

@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -7,7 +6,7 @@ import math
 import os
 
 from config import config
-from data_loader import DataLoaderLite
+from DiNO.data_loader import DataLoaderLite
 from model import SLM
 from lr_schedular import get_lr
 from hellaswag import *
