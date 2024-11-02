@@ -64,14 +64,14 @@ class PatchEmbedding(nn.Module):
 """
 TESTING
 """
-# Initialize data loader
-data_loader = TinyImageNetDataLoader(batch_size=64, num_workers=4)
+# # Initialize data loader
+# data_loader = TinyImageNetDataLoader(batch_size=64, num_workers=4)
 
-# Create an instance of PatchEmbedding
-emd = PatchEmbedding()
+# # Create an instance of PatchEmbedding
+# emd = PatchEmbedding()
 
-# Access the training DataLoader
-for images, labels in data_loader.train_loader:
-    output = emd(images)  # Pass images to the model's forward method
-    print(output.shape)
-    break
+# # Access the training DataLoader
+# for images, labels in data_loader.train_loader:
+#     output = emd(images)  # Pass images to the model's forward method
+#     print(output.shape)
+#     break

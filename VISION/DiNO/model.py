@@ -12,19 +12,22 @@ class ViT(nn.Module):
         super().__init__()
         self.config = config 
         self.transformer = nn.ModuleDict(dict(
-            embd = PatchEmbedding(config.img_size, config.patch_size, config.embd_dim),
+            embd = PatchEmbedding(config.img_size, config.patch_size, config.n_embd),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = nn.LayerNorm(config.n_embd)
         ))
-
-        # the final layer is a linear projection that maps the output of the transformer to the vocabulary
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
-        # some weight initialization that works for ViT
-        return module
+        if isinstance(module, nn.Linear):
+            nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.LayerNorm):
+            nn.init.ones_(module.weight)
+            nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Parameter):
+            nn.init.normal_(module, std=0.02)
      
     def forward(self, x):
         # get the embeddings from the image
@@ -34,32 +37,28 @@ class ViT(nn.Module):
         for block in self.transformer.h:
             x = block(x)
         # forward the final layer norm and the classifier 
-        x = self.transformer.ln_f(x)
-        logits = self.lm_head(x) # (B, T, vocab_size)
-        return logits
+        return x
 
-    def configure_optimizers(self, weight_decay, learning_rate, device):
+    def configure_optimizers(self, weight_decay, learning_rate, betas, device):
         # SOME OPTIMIZATION THAT WORKS FOR ViT
 
-        # # start with all of the candidate parameters (that require grad)
-        # param_dict = {pn: p for pn, p in self.named_parameters()}
-        # param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
-        # # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
-        # # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
-        # decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
-        # nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
-        # optim_groups = [
-        #     {'params': decay_params, 'weight_decay': weight_decay},
-        #     {'params': nodecay_params, 'weight_decay': 0.0}
-        # ]
-        # num_decay_params = sum(p.numel() for p in decay_params)
-        # num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        # print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
-        # print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
-        # # create a fused adamW optimizer if possible
-        # fused_availabel = 'fused' in inspect.signature(torch.optim.AdamW).parameters # type: ignore
-        # use_fused = fused_availabel and 'cuda' in device
-        # print(f"using fused AdamW: {use_fused}")
-        # optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8) # type: ignore
-        # return optimizer
-        return None
+        # Separate parameters into those with and without weight decay
+        decay_params = []
+        no_decay_params = []
+        for name, param in self.named_parameters():
+            if param.requires_grad:
+                if len(param.shape) > 1:
+                    decay_params.append(param)
+                else:
+                    no_decay_params.append(param)
+
+        # create a fused adamW optimizer if possible
+        fused_availabel = 'fused' in inspect.signature(torch.optim.AdamW).parameters # type: ignore
+        use_fused = fused_availabel and 'cuda' in device
+        print(f"using fused AdamW: {use_fused}")
+
+        optimizer = torch.optim.AdamW([
+            {'params': decay_params, 'weight_decay': weight_decay},
+            {'params': no_decay_params, 'weight_decay': 0.0}
+        ], lr=learning_rate, betas=betas, fused=use_fused)
+        return optimizer

@@ -26,7 +26,7 @@ class SelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=False)  # (B, nh, T, hs) Flash attention
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=False, dropout_p=self.config.dropout)  # (B, nh, T, hs) Flash attention
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         # output projection
         y = self.c_proj(y)
