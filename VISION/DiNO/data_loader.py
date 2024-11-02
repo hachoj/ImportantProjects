@@ -71,11 +71,3 @@ class TinyImageNetDataLoader:
             num_workers=num_workers,
             pin_memory=True
         )
-
-# # Initialize data loader
-# data_loader = TinyImageNetDataLoader(batch_size=64, num_workers=4)
-
-# # Access the training DataLoader
-# for images, labels in data_loader.train_loader:
-#     print(images.shape, labels.shape)  # Should print torch.Size([64, 3, 224, 224]) and torch.Size([64])
-#     break

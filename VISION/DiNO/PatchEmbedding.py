@@ -4,7 +4,7 @@ import torch.nn as nn
 from data_loader import TinyImageNetDataLoader
 
 class PatchEmbedding(nn.Module):
-    def __init__(self, img_size: int = 224, patch_size: int = 16, channels: int = 3, embd_dim: int = 384):
+    def __init__(self, img_size: int = 224, patch_size: int = 16, embd_dim: int = 384):
         super().__init__()
         """
         This assumes that the image is square
@@ -16,7 +16,7 @@ class PatchEmbedding(nn.Module):
         self.num_patches = (img_size // patch_size) ** 2
         
         # projection of flattened patch to token embedding
-        self.proj = nn.Linear(self.patch_size**2*channels, self.embd_dim)
+        self.proj = nn.Linear(self.patch_size**2*3, self.embd_dim)
 
         # positional embedding
         self.pos_embd = nn.Parameter(torch.zeros(1, self.num_patches + 1, self.embd_dim))  # +1 for cls token
