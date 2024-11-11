@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim import optimizer
 from config import config
 from data_loader import TinyImageNetDataLoader
 from model import ViT
@@ -32,15 +33,16 @@ losses = []
 
 i = 0
 for images, labels in data_loader.train_loader:
+    optim.zero_grad()
     images, labels = images.to(device), labels.to(device)
     logits = model(images)  # Pass images to the model's forward method
     cls_logit = logits[:,-1,:]
-    one_hot = F.one_hot(labels, 200).float()
-    output = loss(cls_logit, one_hot)
+    output = loss(cls_logit, labels)
     losses.append(output.item())
     print(f"step: {i}, loss: {output.item()}")
     output.backward()
+    optim.step()
     i += 1
-    if i == 720: 
+    if i == 720:
         break
 
