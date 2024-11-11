@@ -16,6 +16,9 @@ class ViT(nn.Module):
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
         ))
 
+        # for traditional training
+        self.classifier = nn.Linear(config.n_embd, 200)
+
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
@@ -28,7 +31,7 @@ class ViT(nn.Module):
             nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Parameter):
             nn.init.normal_(module, std=0.02)
-     
+
     def forward(self, x):
         # get the embeddings from the image
         x = self.transformer.embd(x)
@@ -36,8 +39,8 @@ class ViT(nn.Module):
         # froward the blocks of the transformer
         for block in self.transformer.h:
             x = block(x)
-        # forward the final layer norm and the classifier 
-        return x
+        # forward the final layer norm and the classifier
+        return self.classifier(x)
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device):
         # SOME OPTIMIZATION THAT WORKS FOR ViT
@@ -62,3 +65,4 @@ class ViT(nn.Module):
             {'params': no_decay_params, 'weight_decay': 0.0}
         ], lr=learning_rate, betas=betas, fused=use_fused)
         return optimizer
+

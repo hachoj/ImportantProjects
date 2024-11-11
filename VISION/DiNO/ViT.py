@@ -1,33 +1,46 @@
 import torch
-from model import ViT
+import torch.nn as nn
+import torch.nn.functional as F
 from config import config
 from data_loader import TinyImageNetDataLoader
+from model import ViT
 
 # Initialize the model
 model = ViT(config)
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = "cuda" if torch.cuda.is_available() else "cpu"
 model.to(device)
 torch.compile(model)
 
-# Print the model architecture
-print(model)
-
 # Initialize data loader
-data_loader = TinyImageNetDataLoader(batch_size=64, num_workers=4)
+data_loader = TinyImageNetDataLoader(batch_size=128, num_workers=4)
 
 # Configure the optimizer
-optim = model.configure_optimizers(weight_decay=config.weight_decay, learning_rate=0.001, betas=config.betas, device=device)
+optim = model.configure_optimizers(
+    weight_decay=config.weight_decay,
+    learning_rate=0.001,
+    betas=config.betas,
+    device=device,
+)
 
-# Print the optimizer
-print(optim)
 
 # Test the model on a batch of images
+# very basic test to see if the device even trains
 
+loss = nn.CrossEntropyLoss()
+
+losses = []
+
+i = 0
 for images, labels in data_loader.train_loader:
-    images = images.to(device)
-    output = model(images)  # Pass images to the model's forward method
-    print(output.shape)
-    logits = model(images)
-    print(logits.shape)
-    print(logits)
-    break
+    images, labels = images.to(device), labels.to(device)
+    logits = model(images)  # Pass images to the model's forward method
+    cls_logit = logits[:,-1,:]
+    one_hot = F.one_hot(labels, 200).float()
+    output = loss(cls_logit, one_hot)
+    losses.append(output.item())
+    print(f"step: {i}, loss: {output.item()}")
+    output.backward()
+    i += 1
+    if i == 720: 
+        break
+
