@@ -16,9 +16,6 @@ class ViT(nn.Module):
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
         ))
 
-        # for traditional training
-        self.classifier = nn.Linear(config.n_embd, 200)
-
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
@@ -39,8 +36,7 @@ class ViT(nn.Module):
         # froward the blocks of the transformer
         for block in self.transformer.h:
             x = block(x)
-        # forward the final layer norm and the classifier
-        return self.classifier(x)
+        return x
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device):
         # SOME OPTIMIZATION THAT WORKS FOR ViT
