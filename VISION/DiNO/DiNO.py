@@ -99,7 +99,7 @@ student = ViT(config)
 teacher = ViT(config)
 # try cuda, then mps, then cpu
 device = "cuda" if torch.cuda.is_available() else "cpu"
-device = "mps" if torch.mps.is_available() else "cpu"
+device = "mps" if torch.mps.is_available() and "cuda" not in device else "cpu"
 
 dino_model = DINO(student, teacher, device)
 data_loader = TinyImageNetDataLoader()
