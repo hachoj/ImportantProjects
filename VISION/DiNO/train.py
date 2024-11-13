@@ -26,6 +26,8 @@ def train_dino(dino,
         print(f"Epoch: {epoch+1}/{num_epochs}")
         for batch in data_loader.train_loader:
             views, _ = batch  # We can ignore labels for DiNO
+            print(views.shape)
+            break
             # Unpack views
             global_views = views[:2]  # First two are global views
             local_views = views[2:]   # Remaining are local views

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 @dataclass
 class config:
+    # ViT Config
     img_size:int = 224
     patch_size:int = 16
     num_patches:int = (img_size // patch_size) ** 2
@@ -13,3 +14,9 @@ class config:
     dropout:float = 0.1
     weight_decay:float = 0.1
     betas:tuple = (0.9, 0.999)
+
+    # DINO Config
+    student_temp:float = 0.9
+    teacher_temp:float = 0.04
+    beta:float = 0.9
+    m:float = 0.9
