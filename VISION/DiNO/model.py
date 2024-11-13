@@ -16,6 +16,7 @@ class ViT(nn.Module):
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
         ))
 
+        self.output_dim = config.n_embd
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
@@ -36,7 +37,8 @@ class ViT(nn.Module):
         # froward the blocks of the transformer
         for block in self.transformer.h:
             x = block(x)
-        return x
+        cls_token = x[:, 0, :]
+        return cls_token
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device):
         # SOME OPTIMIZATION THAT WORKS FOR ViT

@@ -1,3 +1,4 @@
+import torch
 import torchvision
 from datasets import load_dataset
 from torch.utils.data import DataLoader, Dataset
@@ -5,9 +6,48 @@ from torchvision import transforms
 
 
 class TinyImageNetDataset(Dataset):
-    def __init__(self, hf_dataset, transforms=None):
+    def __init__(self, hf_dataset):
         self.dataset = hf_dataset
         self.transforms = transforms
+        self.num_global_crops = 2
+        self.num_local_crops = 6
+        self.global_transform1 = transforms.Compose([
+            transforms.RandomResizedCrop(224, scale=(0.4, 1.0)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomApply([
+                transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
+            ], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225]),
+        ])
+
+        self.global_transform2 = transforms.Compose([
+            transforms.RandomResizedCrop(224, scale=(0.4, 1.0)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomApply([
+                transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
+            ], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0)),
+            transforms.RandomSolarize(threshold=128, p=0.2),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225]),
+        ])
+
+        self.local_transform = transforms.Compose([
+            transforms.RandomResizedCrop(96, scale=(0.05, 0.4)),  # Smaller, more concentrated crops
+            transforms.Resize(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.ColorJitter(0.4, 0.4, 0.4, 0.1),  # Same level of jittering
+            transforms.RandomGrayscale(p=0.2),
+            transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
 
     def __len__(self):
         return len(self.dataset)
@@ -15,52 +55,25 @@ class TinyImageNetDataset(Dataset):
     def __getitem__(self, idx):
         item = self.dataset[idx]
         image = item["image"]
-        label = item["label"]
+        labels = item["label"]
 
-        if self.transforms:
-            image = self.transforms(image)
+        global_view1 = self.global_transform1(image)
+        global_view2 = self.global_transform2(image)
+        global_views = [global_view1, global_view2]
 
-        return image, label
+        local_views = [self.local_transform(image) for _ in range(self.num_local_crops)]
 
+        views = global_views + local_views
+
+        return views, labels
 
 class TinyImageNetDataLoader:
-    def __init__(self, batch_size=64, num_workers=4):
+    def __init__(self, batch_size=32, num_workers=4):
         # Load the Tiny-ImageNet dataset using Hugging Face datasets
         dataset = load_dataset("zh-plus/tiny-imagenet")
-
-        # Define the transformations
-        self.train_transforms = transforms.Compose(
-            [
-                transforms.Lambda(
-                    lambda img: img.convert("RGB") if img.mode != "RGB" else img
-                ),  # Convert grayscale to RGB
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                ),
-            ]
-        )
-        self.valid_transforms = transforms.Compose(
-            [
-                transforms.Lambda(
-                    lambda img: img.convert("RGB") if img.mode != "RGB" else img
-                ),  # Convert grayscale to RGB
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                ),
-            ]
-        )
-
         # Create custom Dataset instances for train and validation
-        self.train_data = TinyImageNetDataset(
-            hf_dataset=dataset["train"], transforms=self.train_transforms
-        )
-        self.valid_data = TinyImageNetDataset(
-            hf_dataset=dataset["valid"], transforms=self.valid_transforms
-        )
+        self.train_data = TinyImageNetDataset(hf_dataset=dataset["train"])
+        self.valid_data = TinyImageNetDataset(hf_dataset=dataset["valid"])
 
         # Initialize DataLoaders for train and validation datasets
         self.train_loader = DataLoader(
@@ -77,4 +90,3 @@ class TinyImageNetDataLoader:
             num_workers=num_workers,
             pin_memory=True,
         )
-
