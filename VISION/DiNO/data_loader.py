@@ -70,7 +70,27 @@ class TinyImageNetDataset(Dataset):
 
         return views, labels
 
-class TinyImageNetDataLoader:
+def custom_collate(batch):
+    """
+    Custom collate function to handle multiple views efficiently
+    Args:
+        batch: List of tuples (views, label) from __getitem__
+    Returns:
+        Tuple of (stacked_views, stacked_labels)
+    """
+    # Separate views and labels
+    views, labels = zip(*batch)
+    
+    # Stack all global views together and all local views together
+    global_views = torch.stack([torch.stack([sample[0], sample[1]]) for sample in views])  # Shape: [batch_size, 2, C, H, W]
+    local_views = torch.stack([torch.stack(sample[2:]) for sample in views])   # Shape: [batch_size, 6, C, H, W]
+    
+    # Stack labels
+    labels = torch.tensor(labels)
+    
+    return (global_views, local_views), labels
+
+class TinyImageNetDataLoader: 
     def __init__(self, batch_size=32, num_workers=4):
         # Load the Tiny-ImageNet dataset using Hugging Face datasets
         dataset = load_dataset("zh-plus/tiny-imagenet")
@@ -85,6 +105,7 @@ class TinyImageNetDataLoader:
             shuffle=True,  # Shuffling is generally enabled for training
             num_workers=num_workers,
             pin_memory=True,
+            collate_fn=custom_collate
         )
         self.valid_loader = DataLoader(
             self.valid_data,

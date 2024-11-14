@@ -16,7 +16,11 @@ class config:
     betas:tuple = (0.9, 0.999)
 
     # DINO Config
-    student_temp:float = 0.9
-    teacher_temp:float = 0.04
-    beta:float = 0.9
-    m:float = 0.9
+    student_temp:float = 0.1
+    teacher_temp:float = 0.07
+    beta:float = 0.996
+    m:float = 0.99
+
+    base_lr = 3e-4  # Slightly lower than 5e-4
+    min_lr = 1e-6   # Keep as is
+    warmup_epochs = 15  # Increase from 10
