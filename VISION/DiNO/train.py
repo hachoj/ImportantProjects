@@ -22,11 +22,13 @@ def train_dino(dino,
         beta: Teacher EMA decay
         m: Center moving average decay
     """
+    num_epochs = 1
     for epoch in range(num_epochs):
         print(f"Epoch: {epoch+1}/{num_epochs}")
         for batch in data_loader.train_loader:
             views, _ = batch  # We can ignore labels for DiNO
-            print(views.shape)
+            # print the type of views
+            print(type(views))
             break
             # Unpack views
             global_views = views[:2]  # First two are global views

@@ -12,6 +12,7 @@ class TinyImageNetDataset(Dataset):
         self.num_global_crops = 2
         self.num_local_crops = 6
         self.global_transform1 = transforms.Compose([
+            transforms.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img), # Ensure RGB format
             transforms.RandomResizedCrop(224, scale=(0.4, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.RandomApply([
@@ -25,6 +26,7 @@ class TinyImageNetDataset(Dataset):
         ])
 
         self.global_transform2 = transforms.Compose([
+                transforms.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img), # Ensure RGB format
             transforms.RandomResizedCrop(224, scale=(0.4, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.RandomApply([
@@ -39,6 +41,7 @@ class TinyImageNetDataset(Dataset):
         ])
 
         self.local_transform = transforms.Compose([
+            transforms.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img), # Ensure RGB format
             transforms.RandomResizedCrop(96, scale=(0.05, 0.4)),  # Smaller, more concentrated crops
             transforms.Resize(224),
             transforms.RandomHorizontalFlip(),

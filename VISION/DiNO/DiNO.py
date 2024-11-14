@@ -102,7 +102,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 device = "mps" if torch.mps.is_available() and "cuda" not in device else "cpu"
 
 dino_model = DINO(student, teacher, device)
-data_loader = TinyImageNetDataLoader()
+data_loader = TinyImageNetDataLoader(batch_size=32, num_workers=0)
 
 # configure optimizer
 # create a fused adamW optimizer if possible
