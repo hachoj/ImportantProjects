@@ -26,7 +26,7 @@ class TinyImageNetDataset(Dataset):
         ])
 
         self.global_transform2 = transforms.Compose([
-                transforms.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img), # Ensure RGB format
+            transforms.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img), # Ensure RGB format
             transforms.RandomResizedCrop(224, scale=(0.4, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.RandomApply([

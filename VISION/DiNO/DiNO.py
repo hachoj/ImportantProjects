@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from config import config
 from data_loader import TinyImageNetDataLoader
-from model import ViT
+from vit_model import ViT
 from train import train_dino
 import inspect
 import math
@@ -76,11 +76,11 @@ for name, param in dino_model.named_parameters():
 
 optimizer = torch.optim.AdamW(
     [
-        {"params": decay_params, "weight_decay": weight_decay},
+        {"params": decay_params, "weight_decay": config.weight_decay},
         {"params": no_decay_params, "weight_decay": 0.0},
     ],
-    lr=min_lr,  # Start with minimum learning rate
-    betas=betas,
+    lr=config.min_lr,  # Start with warmup learning rate
+    betas=config.betas,
     fused=use_fused,
 )
 
@@ -94,8 +94,8 @@ train_dino(
     min_lr=min_lr,
     warmup_epochs=warmup_epochs,
     save_dir='./checkpoints',
-    tps=0.9,
+    tps=0.1,
     tpt=0.04,
-    beta=0.9,
-    m=0.9
+    beta=0.9996,
+    m=0.996
 )

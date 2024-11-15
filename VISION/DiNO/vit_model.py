@@ -38,6 +38,9 @@ class ViT(nn.Module):
         for block in self.transformer.h:
             x = block(x)
         cls_token = x[:, 0, :]
+        
+        # Add L2 normalization
+        # cls_token = F.normalize(cls_token, dim=-1)
         return cls_token
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device):
