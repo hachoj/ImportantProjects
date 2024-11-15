@@ -38,3 +38,15 @@ class DINO(nn.Module):
                 param_teacher.data * momentum_teacher
                 + param_student.data * (1.0 - momentum_teacher)
             )
+
+    def forward(self, x, is_student=True):
+        if is_student:
+            return self.student(x)
+        else:
+            return self.teacher(x)
+        
+    def get_teacher_params(self):
+        return self.teacher.parameters()
+    
+    def get_student_params(self):
+        return self.student.parameters()

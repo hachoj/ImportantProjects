@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 import numpy as np
 import math
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 def save_metrics(metrics, save_dir):
     """Save metrics to a JSON file"""
@@ -62,11 +63,19 @@ def train_dino(dino,
                optimizer,
                device,
                config,
+               ddp=False,
+               ddp_local_rank=0,
+               master_process=True,
                save_dir='./checkpoints',
     ):
     """
     Main training loop for DINO
     """
+
+    if ddp:
+        dino = DDP(dino, device_ids=[ddp_local_rank])
+    raw_model = dino.module if ddp else dino
+    
     # Initialize metric tracking
     metrics = {
         'loss': [],
@@ -91,7 +100,12 @@ def train_dino(dino,
     )
      
     for epoch in range(config.num_epochs):
-        print(f"Epoch: {epoch+1}/{config.num_epochs}")
+        if ddp:
+            data_loader.train_sampler.set_epoch(epoch)
+
+        if master_process:
+            print(f"Epoch: {epoch+1}/{config.num_epochs}")
+            
         epoch_loss = 0
         num_batches = 0
         
@@ -107,13 +121,13 @@ def train_dino(dino,
             
             # Forward pass through student
             all_views = torch.cat([global_views, local_views], dim=0)
-            student_outputs = dino.student(all_views)
+            student_outputs = dino(all_views, is_student=True)
             student_outputs = student_outputs.reshape(b, 8, -1)
-            
-            # Forward pass through teacher
-            with torch.no_grad():
-                teacher_outputs = dino.teacher(global_views).reshape(b, 2, -1)
 
+            with torch.no_grad():
+                teacher_outputs = dino(global_views, is_student=False)
+                teacher_outputs = teacher_outputs.reshape(b, 2, -1)
+            
             metrics['student_norm'].append(student_outputs.norm(dim=-1).mean().item())
             metrics['teacher_norm'].append(teacher_outputs.norm(dim=-1).mean().item())
             # Normalize student outputs
@@ -127,7 +141,7 @@ def train_dino(dino,
             loss = compute_dino_loss(
                 student_outputs, 
                 teacher_outputs, 
-                dino.center, 
+                raw_model.center, 
                 config.student_temp, 
                 config.teacher_temp,
                 global_step,
@@ -143,24 +157,24 @@ def train_dino(dino,
             scheduler.step()
 
             # Update teacher network
-            dino.update_teacher(config.beta)
+            raw_model.update_teacher(config.beta)
 
             # Update center
             with torch.no_grad():
                 batch_center = teacher_outputs.mean(dim=(0, 1), keepdim=True).view(1, -1)
-                dino.center = config.m * dino.center.view(1, -1) + (1 - config.m) * batch_center
+                raw_model.center = config.m * raw_model.center.view(1, -1) + (1 - config.m) * batch_center
 
             # Track metrics
             metrics['loss'].append(loss.item())
             metrics['steps'].append(global_step)
-            metrics['center_norm'].append(dino.center.norm(dim=-1).mean().item())
+            metrics['center_norm'].append(raw_model.center.norm(dim=-1).mean().item())
             
             epoch_loss += loss.item()
             num_batches += 1
             global_step += 1
 
             # Print progress
-            if global_step % config.print_every == 0:
+            if master_process and global_step % config.print_every == 0:
                 avg_loss = epoch_loss / num_batches
                 print(
                     f"Step: {global_step}, "
@@ -180,17 +194,18 @@ def train_dino(dino,
         if is_best:
             best_loss = avg_epoch_loss
         
-        if (epoch + 1) % config.checkpoint_freq == 0 or is_best:
-            save_checkpoint(dino, optimizer, epoch, metrics, save_dir, is_best)
-        
-        # Save metrics after each epoch
-        save_metrics(metrics, save_dir)
-        
-        # Print epoch summary
-        print(f"\nEpoch {epoch+1} Summary:")
-        print(f"Average Loss: {avg_epoch_loss:.4f}")
-        print(f"Best Loss: {best_loss:.4f}")
-        print("-" * 50)
+        if master_process:
+            if (epoch + 1) % config.checkpoint_freq == 0 or is_best:
+                save_checkpoint(dino, optimizer, epoch, metrics, save_dir, is_best)
+            
+            # Save metrics after each epoch
+            save_metrics(metrics, save_dir)
+            
+            # Print epoch summary
+            print(f"\nEpoch {epoch+1} Summary:")
+            print(f"Average Loss: {avg_epoch_loss:.4f}")
+            print(f"Best Loss: {best_loss:.4f}")
+            print("-" * 50)
 
     return metrics
 

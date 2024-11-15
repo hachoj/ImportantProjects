@@ -91,22 +91,35 @@ def custom_collate(batch):
     return (global_views, local_views), labels
 
 class TinyImageNetDataLoader: 
-    def __init__(self, batch_size=32, num_workers=4):
+    def __init__(self, batch_size=32, num_workers=4, ddp=False, ddp_rank=0, ddp_world_size=1):
         # Load the Tiny-ImageNet dataset using Hugging Face datasets
         dataset = load_dataset("zh-plus/tiny-imagenet")
         # Create custom Dataset instances for train and validation
         self.train_data = TinyImageNetDataset(hf_dataset=dataset["train"])
         self.valid_data = TinyImageNetDataset(hf_dataset=dataset["valid"])
 
+        # Create sampler for DDP
+        if ddp:
+            train_sampler = torch.utils.data.DistributedSampler(
+                self.train_data,
+                num_replicas=ddp_world_size,
+                rank=ddp_rank,
+                shuffle=True
+            )
+        else:
+            train_sampler = None
+
         # Initialize DataLoaders for train and validation datasets
         self.train_loader = DataLoader(
             self.train_data,
             batch_size=batch_size,
-            shuffle=True,  # Shuffling is generally enabled for training
+            shuffle=(train_sampler is None),  # Only shuffle if not using DDP
+            sampler=train_sampler,
             num_workers=num_workers,
             pin_memory=True,
             collate_fn=custom_collate
         )
+        self.train_sampler = train_sampler
         self.valid_loader = DataLoader(
             self.valid_data,
             batch_size=batch_size,
