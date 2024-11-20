@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from attention import SelfAttention
 from mlp import MLP
 
+
 class Block(nn.Module):
 
     def __init__(self, config):
